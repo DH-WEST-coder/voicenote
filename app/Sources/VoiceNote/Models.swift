@@ -69,9 +69,9 @@ enum Profiles {
     static let defaultTerms = "전력전자 PWM 듀티 듀티비 캐리어 삼각파 스위칭 주파수 인덕터 리플 RL 부하 역기전력 전향 보상 PI 제어기 적분기 안티 와인드업 연속 제어 이산 제어 샘플링 피크 밸리 Simulink PLECS 서브시스템 트리거 레그 암 단락 데드타임"
         .split(separator: " ").map(String.init)
 
-    static let wikiSemester = "/Users/DH_WEST/Library/CloudStorage/GoogleDrive-hello430234@gmail.com/내 드라이브/04_LLMwiki/LLM WIKI for study/raw/05_UNIST/07_3학년 가을학기"
+    /// 기본 프로필의 wiki_dir은 vault 기준 상대경로(semester/과목/transcript).
     static func wiki(_ course: String) -> [String: Any] {
-        ["course": course, "wiki_dir": "\(wikiSemester)/\(course)/transcript"]
+        ["course": course, "wiki_dir": "\(VaultConfig.shared.semester)/\(course)/transcript"]
     }
 
     static func ensureDefaults() {
@@ -113,7 +113,7 @@ enum Profiles {
         for (k, v) in load() where k.precomposedStringWithCanonicalMapping == key {
             guard let o = v as? [String: Any], let c = o["course"] as? String, let d = o["wiki_dir"] as? String,
                   !c.isEmpty, !d.isEmpty else { return nil }
-            return WikiTarget(course: c, dir: d)
+            return WikiTarget(course: c, dir: VaultConfig.resolve(d, vault: VaultConfig.shared.vault))
         }
         return nil
     }

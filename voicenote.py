@@ -2,6 +2,7 @@
 """VoiceNote 엔진: 오디오 → 화자 라벨 Markdown 대본.
 
 사용: .venv/bin/python voicenote.py transcribe <오디오> [--profile 이름] [--speakers N] [--out 폴더] [--json-progress]
+      .venv/bin/python voicenote.py show-config
 
 순서: 변환(afconvert) → 받아쓰기(Qwen3-ASR) ‖ 화자 분리(FluidAudio) → 합치기 → 힌트 누출 제거 → .md
 """
@@ -33,12 +34,40 @@ MAX_GAP = 2.0      # 같은 화자라도 이만큼(초) 쉬면 줄을 나눈다
 MAX_LEN = 60.0     # 한 줄이 이만큼(초) 넘으면 문장 끝에서 나눈다
 LEAK_MIN = 4       # 힌트 용어가 원래 순서대로 이만큼 연속되면 누출로 본다
 
-WIKI_SEM = ("/Users/DH_WEST/Library/CloudStorage/GoogleDrive-hello430234@gmail.com/내 드라이브/04_LLMwiki/"
-            "LLM WIKI for study/raw/05_UNIST/07_3학년 가을학기")
+CONFIG = Path.home() / "Library/Application Support/VoiceNote/config.json"
+# config.json이 없을 때 처음 한 번 쓰는 기본값(코드 안의 유일한 vault 경로). 앱과 같은 파일을 공유한다.
+DEFAULT_VAULT = ("/Users/DH_WEST/Library/CloudStorage/GoogleDrive-hello430234@gmail.com/내 드라이브/04_LLMwiki/"
+                 "LLM WIKI for study")
+DEFAULT_SEMESTER = "raw/05_UNIST/07_3학년 가을학기"
+
+
+def load_config():
+    """{"vault": 절대경로, "semester": vault 기준 상대경로}. 없으면 기본값으로 만든다."""
+    cfg = {"vault": DEFAULT_VAULT, "semester": DEFAULT_SEMESTER}
+    if CONFIG.exists():
+        try:
+            data = json.loads(CONFIG.read_text())
+            if isinstance(data.get("vault"), str) and data["vault"]:
+                cfg["vault"] = data["vault"]
+            if isinstance(data.get("semester"), str):
+                cfg["semester"] = data["semester"]
+        except (ValueError, AttributeError):
+            pass
+    else:
+        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+    return cfg
+
+
+def resolve_wiki_dir(wiki_dir, vault=None):
+    """프로필 wiki_dir 해석: 상대경로는 vault 기준, 절대경로는 그대로."""
+    if not wiki_dir:
+        return wiki_dir
+    return wiki_dir if os.path.isabs(wiki_dir) else str(Path(vault or load_config()["vault"]) / wiki_dir)
 
 
 def _wiki(course):
-    return {"course": course, "wiki_dir": f"{WIKI_SEM}/{course}/transcript"}
+    return {"course": course, "wiki_dir": f"{load_config()['semester']}/{course}/transcript"}
 
 
 _PE_TERMS = [
@@ -46,7 +75,7 @@ _PE_TERMS = [
     "역기전력", "전향", "보상", "PI 제어기", "적분기", "안티 와인드업", "연속 제어", "이산 제어", "샘플링",
     "피크", "밸리", "Simulink", "PLECS", "서브시스템", "트리거", "레그", "암", "단락", "데드타임"]
 
-# course/wiki_dir는 선택 항목. wiki_dir은 위키 raw의 과목 transcript 폴더(앱이 새 파일만 추가한다).
+# course/wiki_dir는 선택 항목. wiki_dir은 vault 기준 상대경로(절대경로도 허용)로, 위키 raw의 과목 transcript 폴더(앱이 새 파일만 추가한다).
 DEFAULT_PROFILES = {
     "전력전자": {"language": "Korean", "terms": _PE_TERMS, **_wiki("전력전자")},
     "Power Electronics (EN)": {"language": "English", "terms": [
@@ -262,7 +291,10 @@ def transcribe_file(args, rep):
         profiles = load_profiles()
         if args.profile not in profiles:
             raise RuntimeError(f"프로필 '{args.profile}' 없음. 있는 프로필: {', '.join(profiles)}")
-        profile, pname = profiles[args.profile], args.profile
+        profile, pname = dict(profiles[args.profile]), args.profile
+        if profile.get("wiki_dir"):
+            profile["wiki_dir"] = resolve_wiki_dir(profile["wiki_dir"])
+        rep.emit("config", vault=load_config()["vault"], wiki_dir=profile.get("wiki_dir", "-"))
     else:
         load_profiles()   # 기본 프로필 파일 만들어 두기
     if not FLUID.exists():
@@ -333,7 +365,14 @@ def main():
     t.add_argument("--speakers", type=int)
     t.add_argument("--out")
     t.add_argument("--json-progress", action="store_true")
+    sc = sub.add_parser("show-config", help="vault/semester와 프로필별 해석된 wiki_dir 출력")
     args = ap.parse_args()
+    if args.cmd == "show-config":
+        cfg = load_config()
+        print(f"config: {CONFIG}\nvault: {cfg['vault']}\nsemester: {cfg['semester']}")
+        for n, p in load_profiles().items():
+            print(f"profile {n}: wiki_dir={resolve_wiki_dir(p.get('wiki_dir'), cfg['vault'])}")
+        return 0
 
     # .venv 파이썬이 아니면 그걸로 다시 실행
     venv_py = VENV / "bin/python"

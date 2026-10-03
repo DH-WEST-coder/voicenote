@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: Store
     @ObservedObject var chat = ChatSettings.shared
+    @ObservedObject var vault = VaultConfig.shared
     @ObservedObject var ap = AutoPreprocess.shared
 
     var body: some View {
@@ -32,10 +33,6 @@ struct SettingsView: View {
                     TextField("모델 (비우면 로드된 첫 모델)", text: $chat.lmModel)
                 }
                 Toggle("위키 vault를 읽기 전용으로 붙여 엔진이 직접 더 찾게 하기", isOn: $chat.attachVault)
-                HStack {
-                    TextField("위키 vault 경로", text: $chat.vaultPath)
-                    Button("선택…") { if let p = chooseFolder() { chat.vaultPath = p } }
-                }
                 Stepper("대본 글자 수 상한: \(chat.transcriptCap)", value: $chat.transcriptCap, in: 5000...300000, step: 5000)
                 Stepper("강의자료 글자 수 상한: \(chat.materialCap)", value: $chat.materialCap, in: 10000...400000, step: 10000)
                 Stepper("항상 전부 보내는 최근 구간: \(chat.recentMinutes)분", value: $chat.recentMinutes, in: 1...60)
@@ -62,6 +59,16 @@ struct SettingsView: View {
                 Text("대본은 항상 ~/Documents/VoiceNote/transcripts/ 에 저장됩니다.").font(.caption).foregroundStyle(.secondary)
             }
             Section("위키") {
+                HStack {
+                    TextField("위키 vault 경로", text: $vault.vault)
+                    Button("선택…") { if let p = chooseFolder() { vault.vault = p } }
+                }
+                TextField("학기 폴더 (vault 기준)", text: $vault.semester)
+                if let w = vault.warning {
+                    Label(w, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+                }
+                Text("vault 위치는 여기 한 곳(config.json)에서만 바꿉니다. 프로필 wiki_dir은 vault 기준 상대경로입니다. 채팅·자동 전처리·엔진이 모두 이 값을 씁니다.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("위키로 자동 보내기", isOn: $store.wikiEnabled)
                 Text("완료되면 프로필의 wiki_dir(과목 transcript 폴더)에 '<과목> <날짜 시각> <제목>.md'로 새 파일을 추가합니다. 기존 파일은 덮어쓰지 않습니다.")
                     .font(.caption).foregroundStyle(.secondary)

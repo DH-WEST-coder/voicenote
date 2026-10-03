@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// 위키의 auto_preprocess.sh를 앱의 자식 프로세스로 주기 실행한다.
-/// launchd로 띄운 bash는 Google Drive(CloudStorage)에 TCC로 막히지만, GUI 앱의 자식이면 접근이 앱에 귀속된다.
+/// launchd로 띄운 bash는 Google Drive 같은 클라우드 폴더에 TCC로 막히지만, GUI 앱의 자식이면 접근이 앱에 귀속된다.
 @MainActor
 final class AutoPreprocess: ObservableObject {
     static let shared = AutoPreprocess()

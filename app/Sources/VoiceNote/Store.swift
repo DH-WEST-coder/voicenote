@@ -44,7 +44,7 @@ final class Store: ObservableObject {
         enginePath = value("--engine") ?? d.string(forKey: "enginePath") ?? "/Users/DH_WEST/LocalAI_Project/voice"
         exportEnabled = value("--export-dir") != nil ? true : d.bool(forKey: "exportEnabled")
         exportFolder = value("--export-dir") ?? d.string(forKey: "exportFolder") ?? ""
-        wikiEnabled = d.object(forKey: "wikiEnabled") as? Bool ?? true
+        wikiEnabled = args.contains("--wiki-enabled") ? true : d.object(forKey: "wikiEnabled") as? Bool ?? true   // --wiki-enabled: 디버그용
         selectedProfile = value("--profile") ?? d.string(forKey: "profile") ?? "전력전자"
         chargingOnly = d.bool(forKey: "chargingOnly")
 

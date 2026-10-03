@@ -27,11 +27,10 @@ final class ChatSettings: ObservableObject {
     @Published var transcriptCap: Int { didSet { d.set(transcriptCap, forKey: "transcriptCap") } }
     @Published var materialCap: Int { didSet { d.set(materialCap, forKey: "materialCap") } }
     @Published var recentMinutes: Int { didSet { d.set(recentMinutes, forKey: "recentMinutes") } }
-    @Published var vaultPath: String { didSet { d.set(vaultPath, forKey: "vaultPath") } }
+    /// vault 경로는 VaultConfig(config.json) 하나만 쓴다.
+    var vaultPath: String { VaultConfig.shared.vault }
     /// 엔진에 위키 vault를 읽기 전용으로 붙여 스스로 더 찾게 한다.
     @Published var attachVault: Bool { didSet { d.set(attachVault, forKey: "attachVault") } }
-
-    static let defaultVault = "/Users/DH_WEST/Library/CloudStorage/GoogleDrive-hello430234@gmail.com/내 드라이브/04_LLMwiki/LLM WIKI for study"
 
     init() {
         engine = ChatEngine(rawValue: d.string(forKey: "chatEngine") ?? "") ?? .agy
@@ -44,7 +43,6 @@ final class ChatSettings: ObservableObject {
         transcriptCap = d.object(forKey: "transcriptCap") as? Int ?? 60000
         materialCap = d.object(forKey: "materialCap") as? Int ?? 120000
         recentMinutes = d.object(forKey: "recentMinutes") as? Int ?? 10
-        vaultPath = d.string(forKey: "vaultPath") ?? Self.defaultVault
         attachVault = d.object(forKey: "attachVault") as? Bool ?? true
     }
 }
