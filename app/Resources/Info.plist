@@ -13,6 +13,7 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>PPT 강의자료를 PowerPoint로 PDF로 바꿀 때 사용합니다.</string>
     <key>NSMicrophoneUsageDescription</key><string>회의/강의 녹음을 위해 마이크를 사용합니다.</string>
 </dict>
 </plist>

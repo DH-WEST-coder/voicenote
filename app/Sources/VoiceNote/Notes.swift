@@ -43,6 +43,25 @@ final class NoteController: ObservableObject {
         return NoteFile.load(id)
     }
 
+    /// 노트에서 고른 부분(없으면 커서가 있는 줄)으로 AI에게 묻는다.
+    func askAI(_ mode: String) {
+        guard let tv = textView, let id = jobID, let job = Store.shared.jobs.first(where: { $0.id == id }) else { return }
+        let ns = tv.string as NSString
+        var r = tv.selectedRange()
+        if r.length == 0 { r = ns.lineRange(for: NSRange(location: min(r.location, ns.length), length: 0)) }
+        let sel = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sel.isEmpty else { return }
+        flush()
+        LayoutState.shared.showChat = true
+        let short = sel.count > 60 ? String(sel.prefix(60)) + "…" : sel
+        let session = ChatHub.shared.session(for: id)
+        if mode == "expand" {
+            session.ask(NotePrompts.expand(sel), job: job, display: "노트 보충: \(short)")
+        } else {
+            session.ask(NotePrompts.explain(sel), job: job, display: "노트 설명: \(short)")
+        }
+    }
+
     /// 커서 위치에 붙인다. 줄 중간이면 줄을 바꾸고, 첫 줄에 현재 시각을 붙인다.
     func insertAtCursor(_ text: String) {
         guard let tv = textView else { return }
@@ -63,6 +82,17 @@ final class NoteController: ObservableObject {
 
 /// 새 줄에 첫 글자를 칠 때 `[m:ss] `를 자동으로 붙이고, 시각을 누르면 그 위치로 이동하는 텍스트 뷰.
 final class TimestampTextView: NSTextView {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let m = super.menu(for: event) ?? NSMenu()
+        let a = NSMenuItem(title: "AI에게 이 부분 설명 요청", action: #selector(askExplain), keyEquivalent: "")
+        let b = NSMenuItem(title: "AI로 이 부분 보충하기", action: #selector(askExpand), keyEquivalent: "")
+        a.target = self; b.target = self
+        m.insertItem(a, at: 0); m.insertItem(b, at: 1); m.insertItem(.separator(), at: 2)
+        return m
+    }
+    @objc private func askExplain() { MainActor.assumeIsolated { NoteController.shared.askAI("explain") } }
+    @objc private func askExpand() { MainActor.assumeIsolated { NoteController.shared.askAI("expand") } }
+
     var clock: (() -> Double?)?
     var onSeek: ((Double) -> Void)?
     var suppressStamp = false

@@ -24,6 +24,8 @@ struct MainWindow: View {
     @EnvironmentObject var store: Store
     @StateObject private var ui = MainUI()
     @ObservedObject private var layout = LayoutState.shared
+    @ObservedObject fileprivate var importer = MaterialImporter.shared
+    @ObservedObject private var profileEditor = ProfileEditorState.shared
 
     var body: some View {
         NavigationSplitView {
@@ -71,11 +73,7 @@ struct MainWindow: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Menu {
-                    Picker("과목 프로필", selection: $store.selectedProfile) {
-                        Text("자동(프로필 없음)").tag("")
-                        ForEach(store.profiles, id: \.self) { Text($0).tag($0) }
-                    }
-                    .pickerStyle(.inline)
+                    ProfileMenuItems(current: store.selectedProfile) { store.selectedProfile = $0 }
                 } label: {
                     Label(store.selectedProfile.isEmpty ? "프로필 없음" : store.selectedProfile, systemImage: "graduationcap")
                         .labelStyle(.titleAndIcon)
@@ -102,10 +100,15 @@ struct MainWindow: View {
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
-            let ok = urls.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
-            store.importFiles(ok)
+            let ok = MaterialImporter.expand(urls).filter {
+                let e = $0.pathExtension.lowercased(); return audioExtensions.contains(e) || docExtensions.contains(e)
+            }
+            importer.request(urls)
             return !ok.isEmpty
         } isTargeted: { ui.dropTargeted = $0 }
+        .sheet(isPresented: $importer.showPicker) { DownloadsPicker() }
+        .sheet(item: $profileEditor.editing) { e in ProfileEditor(editing: e).environmentObject(store) }
+        .sheet(item: $importer.pending) { p in MaterialImportSheet(pending: p).environmentObject(store) }
         .overlay {
             if ui.dropTargeted {
                 RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
@@ -144,6 +147,12 @@ extension MainWindow {
         let processing = store.jobs.first { $0.status == .processing }
         let queued = store.jobs.filter { $0.status == .queued }.count
         return VStack(alignment: .leading, spacing: 6) {
+            if let s = importer.status {
+                HStack(spacing: 6) { ProgressView().controlSize(.small); Text(s).lineLimit(1) }.font(.caption)
+            }
+            if !store.pendingAttachments.isEmpty {
+                Label("다음 녹음에 자료 \(store.pendingAttachments.count)개 연결됨", systemImage: "link").font(.caption).foregroundStyle(.secondary)
+            }
             if let p = processing {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -153,7 +162,7 @@ extension MainWindow {
                 .font(.caption)
             }
             HStack {
-                Button { pickAudioFiles(into: store) } label: { Label("파일 가져오기", systemImage: "square.and.arrow.down") }
+                Button { importer.showPicker = true } label: { Label("파일 가져오기", systemImage: "square.and.arrow.down") }
                     .buttonStyle(.borderless)
                 Spacer()
                 BatteryBadge()
@@ -175,7 +184,7 @@ struct EmptyDetail: View {
                 .foregroundStyle(LinearGradient(colors: [Theme.record, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
             VStack(spacing: 6) {
                 Text("수업을 녹음해 보세요").font(.title2.weight(.semibold))
-                Text("녹음이 끝나면 화자별 대본이 자동으로 만들어집니다.\n오디오 파일을 이 창에 끌어다 놓아도 됩니다.")
+                Text("녹음이 끝나면 화자별 대본이 자동으로 만들어집니다.\n오디오나 강의자료(PDF·PPT, 폴더도 가능)를 이 창에 끌어다 놓아도 됩니다.")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
             }
             RecordButton(large: true)
@@ -298,6 +307,14 @@ struct TranscriptView: View {
                 }
             }
             HStack(spacing: 6) {
+                Menu {
+                    ProfileMenuItems(current: job.profile) { p in store.update(job.id) { $0.profile = p } }
+                } label: {
+                    Chip(text: job.profile.isEmpty ? "프로필 없음" : job.profile, systemImage: "graduationcap",
+                         tint: job.profile.isEmpty ? .orange : .secondary)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("이 녹음의 과목 프로필 (위키로 보낼 폴더)")
                 ForEach(metaChips, id: \.0) { Chip(text: $0.0, systemImage: $0.1) }
                 if job.wikiPath != nil { Chip(text: "위키에 있음", systemImage: "checkmark", tint: .green) }
             }
@@ -341,7 +358,7 @@ struct TranscriptView: View {
     }
 
     private var metaChips: [(String, String)] {
-        var parts = [(job.profile.isEmpty ? "프로필 없음" : job.profile, "graduationcap")]
+        var parts: [(String, String)] = []
         if let d = st.transcript?.meta["duration"] { parts.append((d, "clock")) }
         if let w = job.avgWatts { parts.append((String(format: "평균 %.1fW", w), "bolt")) }
         if let u = job.batteryUsedPct, job.avgWatts != nil { parts.append((String(format: "배터리 -%.1f%%p", u), "battery.50")) }
@@ -434,7 +451,7 @@ struct JobDetail: View {
     var body: some View {
         HSplitView {
             VSplitView {
-                TranscriptView(job: job).frame(minHeight: 200)
+                TopPane(job: job).frame(minHeight: 200)
                     .background(Theme.paneBackground)
                 NoteView(job: job).frame(minHeight: 140)
             }

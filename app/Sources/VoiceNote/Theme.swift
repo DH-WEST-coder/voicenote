@@ -69,15 +69,6 @@ struct Chip: View {
     }
 }
 
-@MainActor func pickAudioFiles(into store: Store) {
-    let p = NSOpenPanel()
-    p.allowsMultipleSelection = true
-    p.canChooseDirectories = false
-    p.allowedContentTypes = [.audio, .movie]
-    NSApp.activate(ignoringOtherApps: true)
-    if p.runModal() == .OK { store.importFiles(p.urls) }
-}
-
 /// 채팅 답변용 간단한 Markdown 블록 렌더러(제목, 목록, 인용, 코드 블록, 구분선 + 인라인 서식)
 struct MarkdownText: View {
     let text: String

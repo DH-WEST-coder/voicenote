@@ -24,6 +24,8 @@ final class Store: ObservableObject {
     @Published var elapsed: TimeInterval = 0
     @Published var message: String?
     @Published var transcriptRevision = 0
+    /// 녹음을 고르지 않은 채 넣은 자료: 다음 녹음에 연결한다.
+    @Published var pendingAttachments: [Attachment] = []
 
     private var recorder: AVAudioRecorder?
     private var recordURL: URL?
@@ -87,6 +89,17 @@ final class Store: ObservableObject {
                 print("with course:", MaterialIndex.shared.pick(text: text, prefixes: pre).map(\.name))
                 print("no profile :", MaterialIndex.shared.pick(text: text, prefixes: []).map(\.name))
                 exit(0)
+            }
+        }
+        // 디버그: --import-material <파일> --import-course <과목> (확인 창 없이 자료 넣기)
+        if let f = value("--import-material"), let c = value("--import-course") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                MainActor.assumeIsolated {
+                    let mi = MaterialImporter.shared
+                    mi.request([URL(fileURLWithPath: f)])
+                    mi.course = c
+                    if let p = mi.pending { mi.confirm(p) }
+                }
             }
         }
         let seedT = value("--seed-done"), seedA = value("--seed-audio")
@@ -210,6 +223,7 @@ final class Store: ObservableObject {
             // 녹음 중에도 노트를 쓸 수 있도록 작업을 바로 만든다(status=recording).
             var job = Job(audioPath: url.path, title: "녹음 " + titleDate(Date()), createdAt: Date(), duration: nil, profile: selectedProfile)
             job.status = .recording
+            if !pendingAttachments.isEmpty { job.attachments = pendingAttachments; pendingAttachments = [] }
             jobs.insert(job, at: 0); selectedID = job.id; recordingJobID = job.id; saveState()
             trackPower(job.id)
             recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
@@ -433,10 +447,19 @@ final class Store: ObservableObject {
         guard let job = jobs.first(where: { $0.id == id }), let src = job.transcriptPath,
               FileManager.default.fileExists(atPath: src) else { return }
         guard let t = Profiles.wikiTarget(for: job.profile) else {
-            if manual { message = "프로필 '\(job.profile)'에 위키 폴더(course/wiki_dir)가 설정되어 있지 않습니다." }
+            if manual {
+                message = job.profile.isEmpty
+                    ? "이 녹음에는 과목 프로필이 없어서 어느 위키 폴더로 보낼지 모릅니다. 제목 아래 주황색 '프로필 없음'을 눌러 과목을 고른 뒤 다시 보내 주세요."
+                    : "프로필 '\(job.profile)'에 위키 과목 폴더가 없습니다. 프로필을 고쳐 과목 폴더를 정해 주세요."
+            }
             return
         }
         var isDir: ObjCBool = false
+        // 과목 폴더는 있는데 transcript/만 없으면 만든다.
+        let parent = (t.dir as NSString).deletingLastPathComponent
+        if !FileManager.default.fileExists(atPath: t.dir), FileManager.default.fileExists(atPath: parent) {
+            try? FileManager.default.createDirectory(atPath: t.dir, withIntermediateDirectories: false)
+        }
         guard FileManager.default.fileExists(atPath: t.dir, isDirectory: &isDir), isDir.boolValue else {
             log("wiki dir missing \(t.dir)")
             if manual { message = "위키 폴더가 없습니다: \(t.dir)" }

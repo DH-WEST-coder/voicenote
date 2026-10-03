@@ -76,7 +76,7 @@ struct MenuContent: View {
         if ap.accessWarning != nil { Text("⚠︎ Google Drive 접근 권한 필요 (설정 참고)") }
         Divider()
         Button("목록 창 열기") { show("main") }
-        Button("오디오 파일 가져오기…") { pickFiles() }
+        Button("파일 가져오기…") { show("main"); MaterialImporter.shared.showPicker = true }
         Button("설정…") { show("settings") }
         Divider()
         Button("종료") { NSApp.terminate(nil) }.keyboardShortcut("q")
@@ -87,5 +87,4 @@ struct MenuContent: View {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func pickFiles() { pickAudioFiles(into: store) }
 }

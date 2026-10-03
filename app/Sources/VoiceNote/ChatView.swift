@@ -12,6 +12,19 @@ struct ChatView: View {
     let job: Job
     @ObservedObject var session: ChatSession
     @StateObject private var ui = ChatUI()
+    @ObservedObject private var catalog = ModelCatalog.shared
+
+    private var engineTitle: String {
+        switch settings.engine {
+        case .agy:
+            let m = settings.agyModel
+            return "Gemini · " + (m.isEmpty ? "기본" : catalog.agy.first { $0.id == m }?.label ?? m)
+        case .codex:
+            let m = settings.codexModel
+            return "GPT · " + (m.isEmpty ? "기본" : catalog.codex.first { $0.id == m }?.label ?? m)
+        case .lmstudio: return settings.engine.label
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,8 +52,30 @@ struct ChatView: View {
                     ForEach(ChatEngine.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.inline)
-            } label: { Text(settings.engine.label).font(.caption) }
+                if settings.engine == .agy {
+                    Divider()
+                    Picker("Gemini 모델", selection: $settings.agyModel) {
+                        Text("기본값").tag("")
+                        ForEach(catalog.agy, id: \.id) { Text($0.label).tag($0.id) }
+                        if !settings.agyModel.isEmpty && !catalog.agy.contains(where: { $0.id == settings.agyModel }) {
+                            Text(settings.agyModel).tag(settings.agyModel)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                } else if settings.engine == .codex {
+                    Divider()
+                    Picker("GPT 모델", selection: $settings.codexModel) {
+                        Text("기본값 (codex 설정)").tag("")
+                        ForEach(catalog.codex, id: \.id) { Text($0.label).tag($0.id) }
+                        if !settings.codexModel.isEmpty && !catalog.codex.contains(where: { $0.id == settings.codexModel }) {
+                            Text(settings.codexModel).tag(settings.codexModel)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
+            } label: { Text(engineTitle).font(.caption) }
             .menuStyle(.borderlessButton).fixedSize()
+            .onAppear { catalog.load() }
             Button { session.clear() } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless)
                 .help("이 세션의 채팅 기록 지우기").disabled(session.busy || session.messages.isEmpty)
@@ -118,6 +153,11 @@ struct ChatView: View {
                 }
                 .buttonStyle(.borderedProminent).controlSize(.small)
                 .help("대본 + 관련 자료로 구조화된 노트 작성")
+                Button { session.ask(NotePrompts.fill, job: job, display: "내 노트 기준으로 보충") } label: {
+                    Label("노트 보충", systemImage: "note.text.badge.plus")
+                }
+                .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+                .help("내 노트를 기준으로 대본·자료에서 빠진 내용을 채움 (노트에서 글을 골라 우클릭해도 됩니다)")
                 ForEach(ui.prompts.quick) { q in
                     Button(q.label) { session.ask(q.prompt, job: job) }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)

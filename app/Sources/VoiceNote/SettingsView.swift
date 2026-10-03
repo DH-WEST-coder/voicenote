@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject private var profileEditor = ProfileEditorState.shared
     @EnvironmentObject var store: Store
     @ObservedObject var chat = ChatSettings.shared
     @ObservedObject var vault = VaultConfig.shared
@@ -90,6 +91,11 @@ struct SettingsView: View {
             }
             Section("프로필") {
                 HStack {
+                    Button("새 프로필…") { ProfileEditorState.shared.new() }
+                    Menu("프로필 고치기") {
+                        ForEach(store.profiles, id: \.self) { p in Button(p) { ProfileEditorState.shared.edit(p) } }
+                    }
+                    .fixedSize()
                     Button("profiles.json을 Finder에서 열기") {
                         Profiles.ensureDefaults()
                         NSWorkspace.shared.activateFileViewerSelecting([Paths.profilesFile])
@@ -102,6 +108,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520)
+        .sheet(item: $profileEditor.editing) { e in ProfileEditor(editing: e).environmentObject(store) }
         .padding(.vertical, 8)
     }
 

@@ -92,6 +92,26 @@ struct ChatPrompts: Codable {
     }
 }
 
+/// 노트를 기준으로 묻는 고정 프롬프트
+enum NotePrompts {
+    static let fill = """
+    내 노트를 기준으로 정리해 줘. 노트의 항목 순서([m:ss])를 그대로 따르면서, 각 항목에 대해 대본과 강의자료에서 빠진 설명·수식·예시를 찾아 보충해 줘.
+    - 새로 넣은 내용에는 근거 [mm:ss]와 p.N을 붙인다.
+    - 노트가 대본·자료와 어긋나면 "확인 필요"로 짚는다.
+    - 마지막에 "노트에 빠진 것"으로, 수업에서 중요하게 다뤘는데 노트에 없는 내용을 모아 준다.
+    """
+
+    static func explain(_ sel: String) -> String {
+        "내 노트의 다음 부분을 대본(같은 시각 전후)과 강의자료를 근거로 쉽게 설명해 줘. 근거 [mm:ss]·p.N을 붙여 줘.\n\n> " +
+            sel.replacingOccurrences(of: "\n", with: "\n> ")
+    }
+
+    static func expand(_ sel: String) -> String {
+        "내 노트의 다음 부분을 대본과 강의자료에서 찾아 보충해 줘. 노트에 바로 붙일 수 있게 짧은 목록으로, 근거 [mm:ss]·p.N과 함께.\n\n> " +
+            sel.replacingOccurrences(of: "\n", with: "\n> ")
+    }
+}
+
 // MARK: - 강의자료 색인 / 자동 선택
 
 struct MaterialFile: Identifiable, Hashable {
@@ -318,7 +338,24 @@ enum ChatContext {
         let tr = lines.isEmpty ? "(아직 대본이 없다)" : trim(lines, now: now, cap: settings.transcriptCap, recentMin: settings.recentMinutes)
         p += "<강의 대본>\n\(tr)\n</강의 대본>\n"
         p += materials.isEmpty ? "\n(자동/선택된 강의자료 없음)\n" : readMaterials(materials, cap: settings.materialCap)
-        p += "\n<내 노트>\n\(notes.isEmpty ? "(비어 있음)" : notes)\n</내 노트>\n"
+        let atts = job.attachments ?? []
+        if !atts.isEmpty {
+            let per = max(4000, settings.materialCap / atts.count)
+            for a in atts {
+                if let t = MaterialImporter.text(of: a, cap: per) {
+                    p += "\n<수업 자료 파일=\"\(a.name)\" (이 수업에 직접 넣은 슬라이드·PDF, 페이지는 [p.N])>\n\(t)\n</수업 자료>\n"
+                } else {
+                    p += "\n(수업 자료 \(a.name): 본문을 읽을 수 없음)\n"
+                }
+            }
+        }
+        p += """
+
+        <내 노트 (학생이 수업 중 직접 쓴 것. [m:ss]는 녹음 시각. 학생의 이해·관심이 드러나므로 답할 때 기준으로 삼고, 노트와 대본·자료가 어긋나면 짚어 줄 것)>
+        \(notes.isEmpty ? "(비어 있음)" : notes)
+        </내 노트>
+
+        """
         let hist = history.suffix(8).filter { !$0.isError && !$0.text.isEmpty }
         if !hist.isEmpty {
             p += "\n<이전 대화>\n" + hist.map { ($0.role == "user" ? "사용자: " : "도우미: ") + $0.text }.joined(separator: "\n\n") + "\n</이전 대화>\n"
@@ -556,9 +593,10 @@ final class ChatSession: ObservableObject {
         let vault = ChatSettings.shared.vaultPath
         let prefixes = Materials.prefixes(course: Profiles.course(for: job.profile), vault: vault)
         let text = ChatContext.transcriptLines(job: job).map(\.text).joined(separator: "\n")
+            + "\n" + NoteController.shared.noteText(jobID: job.id)
         MaterialIndex.shared.ensureBuilt(vault: vault) { [weak self] in
             guard let self, !self.manualMaterials else { return }
-            // 대본이 없으면 과목 파일을 고르지 않는다(질문 때 다시 고른다).
+            // 대본·노트가 없으면 과목 파일을 고르지 않는다(질문 때 다시 고른다).
             let picked = MaterialIndex.shared.pick(text: text, prefixes: prefixes).map(\.name)
             self.materials = picked; self.save()
         }
@@ -572,12 +610,12 @@ final class ChatSession: ObservableObject {
 
     func stop() { runner?.cancel() }
 
-    func ask(_ question: String, job: Job, organize: Bool = false) {
+    func ask(_ question: String, job: Job, organize: Bool = false, display: String? = nil) {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !busy else { return }
         let settings = ChatSettings.shared
         let engine = settings.engine
-        messages.append(ChatMessage(role: "user", text: organize ? "수업 정리" : q))
+        messages.append(ChatMessage(role: "user", text: organize ? "수업 정리" : (display ?? q)))
         messages.append(ChatMessage(role: "assistant", text: "", engine: engine.rawValue))
         busy = true; waitingFirstToken = true; ttft = nil
         let history = Array(messages.dropLast(2))
@@ -590,7 +628,7 @@ final class ChatSession: ObservableObject {
         if !manualMaterials {
             let vault = settings.vaultPath
             let picked = MaterialIndex.shared.pick(
-                text: ChatContext.transcriptLines(job: job).map(\.text).joined(separator: "\n"),
+                text: ChatContext.transcriptLines(job: job).map(\.text).joined(separator: "\n") + "\n" + notes,
                 prefixes: Materials.prefixes(course: Profiles.course(for: job.profile), vault: vault)).map(\.name)
             if !picked.isEmpty { materials = picked }
         }
