@@ -51,6 +51,7 @@ struct MenuLabel: View {
 
 struct MenuContent: View {
     @EnvironmentObject var store: Store
+    @ObservedObject var ap = AutoPreprocess.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -74,6 +75,9 @@ struct MenuContent: View {
         let queued = store.jobs.filter { $0.status == .queued }.count
         if queued > 0 { Text("대기 \(queued)건") }
 
+        Divider()
+        Text(ap.menuLine)
+        if ap.accessWarning != nil { Text("⚠︎ Google Drive 접근 권한 필요 (설정 참고)") }
         Divider()
         Button("목록 창 열기") { show("main") }
         Button("오디오 파일 가져오기…") { pickFiles() }

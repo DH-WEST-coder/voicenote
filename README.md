@@ -28,7 +28,7 @@ open app/build/VoiceNote.app
 |---|---|
 | `voicenote.py` | 엔진: 변환 → 받아쓰기 ‖ 화자 분리 → 합치기 → 힌트 누출 제거 → .md |
 | `app/` | SwiftUI 메뉴바·노트 앱 (Xcode 없이 `app/build.sh`) |
-| `launchd/` | 위키 자동 전처리용 launchd 작업(위키 쪽 `auto_preprocess.sh`를 15분마다 실행) |
+| `app/Sources/VoiceNote/AutoPreprocess.swift` | 위키 자동 전처리 스케줄러(위키 쪽 `auto_preprocess.sh`를 앱의 자식 프로세스로 15분마다 실행 — launchd는 Drive TCC에 막혀 대체) |
 | `merge.py`, `diarize.py`, `bench_whisper.py` | 벤치마크 때 쓴 스크립트 |
 
 경로(위키 vault 등)는 이 맥 기준으로 코드에 들어 있다.

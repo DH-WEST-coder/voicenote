@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: Store
     @ObservedObject var chat = ChatSettings.shared
+    @ObservedObject var ap = AutoPreprocess.shared
 
     var body: some View {
         let engineOK = FileManager.default.isExecutableFile(atPath: store.enginePath + "/.venv/bin/python")
@@ -63,6 +64,21 @@ struct SettingsView: View {
             Section("위키") {
                 Toggle("위키로 자동 보내기", isOn: $store.wikiEnabled)
                 Text("완료되면 프로필의 wiki_dir(과목 transcript 폴더)에 '<과목> <날짜 시각> <제목>.md'로 새 파일을 추가합니다. 기존 파일은 덮어쓰지 않습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("위키 자동 전처리") {
+                Toggle("앱이 켜져 있는 동안 자동 실행", isOn: $ap.enabled)
+                Stepper("실행 간격: \(ap.intervalMinutes)분", value: $ap.intervalMinutes, in: 1...240)
+                HStack {
+                    Button(ap.running ? "실행 중…" : "지금 실행") { ap.runNow() }.disabled(ap.running)
+                    Button("run.log 열기") { ap.openRunLog() }
+                    Button("앱 로그 보기") { ap.openAppLog() }
+                }
+                Text(ap.menuLine).font(.caption)
+                if let w = ap.accessWarning {
+                    Label(w, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                }
+                Text("위키의 auto_preprocess.sh를 앱의 자식 프로세스로 실행합니다(첫 실행은 시작 1분 뒤, 대본을 위키로 보낸 뒤 약 11분 후에도 실행). 로그: ~/Library/Application Support/VoiceNote/logs/autopreprocess.log")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("프로필") {

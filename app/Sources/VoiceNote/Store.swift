@@ -117,6 +117,7 @@ final class Store: ObservableObject {
                     }
                 }
                 self.pump()
+                AutoPreprocess.shared.start(debugDryRunNow: args.contains("--autopreprocess-dry-run-now"))
             }
         }
     }
@@ -458,6 +459,7 @@ final class Store: ObservableObject {
             try FileManager.default.copyItem(at: URL(fileURLWithPath: src), to: dest)
             update(id) { $0.wikiPath = dest.path }
             log("wiki sent \(dest.path)")
+            AutoPreprocess.shared.scheduleAfterWikiSend()
         } catch {
             message = "위키로 보내기 실패: \(error.localizedDescription)"
         }
