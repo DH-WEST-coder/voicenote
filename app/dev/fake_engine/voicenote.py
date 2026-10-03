@@ -14,6 +14,7 @@ def main():
     t.add_argument("audio"); t.add_argument("--profile", default="")
     t.add_argument("--speakers"); t.add_argument("--out", default=".")
     t.add_argument("--json-progress", action="store_true")
+    t.add_argument("--terms-file"); t.add_argument("--language")
     a = ap.parse_args()
     if not os.path.exists(a.audio):
         emit(stage="error", message="파일 없음: " + a.audio); sys.exit(2)

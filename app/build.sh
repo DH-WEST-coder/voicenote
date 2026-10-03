@@ -1,10 +1,10 @@
 #!/bin/bash
-# VoiceNote.app 빌드: SwiftPM release 빌드 → 번들 조립 → ad-hoc 서명
+# VNote.app 빌드: SwiftPM release 빌드 → 번들 조립 → ad-hoc 서명
 set -euo pipefail
 cd "$(dirname "$0")"
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)"
-APP="build/VoiceNote.app"
+APP="build/VNote.app"   # 옛 build/VoiceNote.app은 건드리지 않는다(실행 중일 수 있음)
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/VoiceNote" "$APP/Contents/MacOS/VoiceNote"

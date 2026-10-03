@@ -199,6 +199,9 @@ def find_leaks(text, terms):
     return spans
 
 
+# 용어 힌트 상한: 너무 길면 느려지고 대본에 힌트가 새어 나온다
+MAX_TERMS = 80
+
 # ---------- 프로필 ----------
 
 def load_profiles():
@@ -297,6 +300,16 @@ def transcribe_file(args, rep):
         rep.emit("config", vault=load_config()["vault"], wiki_dir=profile.get("wiki_dir", "-"))
     else:
         load_profiles()   # 기본 프로필 파일 만들어 두기
+    # 노트별 용어(앱이 강의자료에서 뽑은 것)와 언어: 프로필 값에 더하거나 덮어쓴다
+    if args.terms_file:
+        extra = [t.strip() for t in Path(args.terms_file).read_text().splitlines() if t.strip()]
+        seen, merged = set(), []
+        for t in (profile.get("terms") or []) + extra:
+            if t.lower() not in seen:
+                seen.add(t.lower()); merged.append(t)
+        profile["terms"] = merged[:MAX_TERMS]
+    if args.language:
+        profile["language"] = None if args.language == "auto" else args.language
     if not FLUID.exists():
         raise RuntimeError(f"fluidaudiocli가 없습니다: {FLUID}")
 
@@ -365,6 +378,8 @@ def main():
     t.add_argument("--speakers", type=int)
     t.add_argument("--out")
     t.add_argument("--json-progress", action="store_true")
+    t.add_argument("--terms-file", help="용어 힌트 파일(한 줄에 하나). 프로필 용어에 더한다")
+    t.add_argument("--language", help="Korean | English | auto (프로필 언어를 덮어씀)")
     sc = sub.add_parser("show-config", help="vault/semester와 프로필별 해석된 wiki_dir 출력")
     args = ap.parse_args()
     if args.cmd == "show-config":

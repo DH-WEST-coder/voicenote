@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 노트 파일: ~/Documents/VoiceNote/notes/<job id>.md
+/// 노트 파일: ~/Documents/VoiceNote/notes/<노트 id>.md
 enum NoteFile {
     static func url(_ id: UUID) -> URL { Paths.notes.appendingPathComponent("\(id.uuidString).md") }
     static func load(_ id: UUID) -> String { (try? String(contentsOf: url(id), encoding: .utf8)) ?? "" }
@@ -18,7 +18,7 @@ enum NoteFile {
 final class NoteController: ObservableObject {
     static let shared = NoteController()
     weak var textView: TimestampTextView?
-    var jobID: UUID?
+    var sessionID: UUID?
     var dirty = false
     private var work: DispatchWorkItem?
     @Published var savedAt: Date?
@@ -33,19 +33,19 @@ final class NoteController: ObservableObject {
 
     func flush() {
         work?.cancel()
-        guard dirty, let id = jobID, let tv = textView else { return }
+        guard dirty, let id = sessionID, let tv = textView else { return }
         NoteFile.save(id, tv.string)
         dirty = false; savedAt = Date()
     }
 
-    func noteText(jobID id: UUID) -> String {
-        if jobID == id, let tv = textView { return tv.string }
+    func noteText(sessionID id: UUID) -> String {
+        if sessionID == id, let tv = textView { return tv.string }
         return NoteFile.load(id)
     }
 
     /// 노트에서 고른 부분(없으면 커서가 있는 줄)으로 AI에게 묻는다.
     func askAI(_ mode: String) {
-        guard let tv = textView, let id = jobID, let job = Store.shared.jobs.first(where: { $0.id == id }) else { return }
+        guard let tv = textView, let id = sessionID, let sess = Store.shared.session(id) else { return }
         let ns = tv.string as NSString
         var r = tv.selectedRange()
         if r.length == 0 { r = ns.lineRange(for: NSRange(location: min(r.location, ns.length), length: 0)) }
@@ -56,9 +56,9 @@ final class NoteController: ObservableObject {
         let short = sel.count > 60 ? String(sel.prefix(60)) + "…" : sel
         let session = ChatHub.shared.session(for: id)
         if mode == "expand" {
-            session.ask(NotePrompts.expand(sel), job: job, display: "노트 보충: \(short)")
+            session.ask(NotePrompts.expand(sel), session: sess, display: "노트 보충: \(short)")
         } else {
-            session.ask(NotePrompts.explain(sel), job: job, display: "노트 설명: \(short)")
+            session.ask(NotePrompts.explain(sel), session: sess, display: "노트 설명: \(short)")
         }
     }
 
@@ -167,7 +167,7 @@ final class TimestampTextView: NSTextView {
 }
 
 struct NoteEditor: NSViewRepresentable {
-    let jobID: UUID
+    let sessionID: UUID
     let clock: () -> Double?
     let onSeek: (Double) -> Void
 
@@ -200,8 +200,8 @@ struct NoteEditor: NSViewRepresentable {
         context.coordinator.tv = tv
         let nc = NoteController.shared
         nc.flush()
-        nc.textView = tv; nc.jobID = jobID; nc.dirty = false
-        tv.string = NoteFile.load(jobID)
+        nc.textView = tv; nc.sessionID = sessionID; nc.dirty = false
+        tv.string = NoteFile.load(sessionID)
         tv.restyle()
         tv.clock = clock; tv.onSeek = onSeek
         return scroll
@@ -232,7 +232,7 @@ struct NoteView: View {
     @EnvironmentObject var store: Store
     @ObservedObject var player = AudioPlayer.shared
     @ObservedObject var nc = NoteController.shared
-    let job: Job
+    let session: Session
 
     var body: some View {
         VStack(spacing: 0) {
@@ -246,10 +246,10 @@ struct NoteView: View {
                 }
             }
             .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 6)
-            NoteEditor(jobID: job.id,
-                       clock: { [store, job] in MainActor.assumeIsolated { store.notePosition(for: job) } },
-                       onSeek: { [store, job] sec in MainActor.assumeIsolated { store.seek(job: job, to: sec) } })
-                .id(job.id)
+            NoteEditor(sessionID: session.id,
+                       clock: { [store, session] in MainActor.assumeIsolated { store.notePosition(for: session) } },
+                       onSeek: { [store, session] sec in MainActor.assumeIsolated { store.seek(session: session, to: sec) } })
+                .id(session.id)
                 .background(Theme.paneBackground, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
                 .padding(.horizontal, 14).padding(.bottom, 14)
@@ -258,8 +258,9 @@ struct NoteView: View {
     }
 
     private var hint: String {
-        if job.status == .recording { return "새 줄을 쓰면 녹음 시각이 붙습니다" }
-        if player.loadedPath == job.audioPath { return "새 줄을 쓰면 재생 위치가 붙습니다 · 시각을 누르면 이동" }
-        return "재생을 시작하면 새 줄에 시각이 붙습니다"
+        let rs = store.recordings(of: session)
+        if rs.contains(where: { $0.status == .recording }) { return "새 줄을 쓰면 녹음 시각이 붙습니다" }
+        if rs.contains(where: { $0.audioPath == player.loadedPath }) { return "새 줄을 쓰면 재생 위치가 붙습니다 · 시각을 누르면 이동" }
+        return "녹음하거나 재생하면 새 줄에 누적 시각이 붙습니다"
     }
 }

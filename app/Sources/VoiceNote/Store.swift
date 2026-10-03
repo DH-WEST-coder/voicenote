@@ -9,14 +9,17 @@ let audioExtensions: Set<String> = ["m4a", "mp3", "wav", "aac", "flac", "aif", "
 final class Store: ObservableObject {
     static let shared = Store()
 
+    /// 녹음 하나하나(받아쓰기 단위)
     @Published var jobs: [Job] = []
-    @Published var selectedID: UUID?
+    /// 노트(수업 1회)와 프로젝트
+    @Published var sessions: [Session] = []
+    @Published var projects: [Project] = []
+    @Published var selectedSessionID: UUID? { didSet { UserDefaults.standard.set(selectedSessionID?.uuidString, forKey: "selectedSession") } }
     @Published var profiles: [String] = []
     @Published var selectedProfile: String { didSet { UserDefaults.standard.set(selectedProfile, forKey: "profile") } }
     @Published var enginePath: String { didSet { UserDefaults.standard.set(enginePath, forKey: "enginePath") } }
     @Published var exportEnabled: Bool { didSet { UserDefaults.standard.set(exportEnabled, forKey: "exportEnabled") } }
     @Published var exportFolder: String { didSet { UserDefaults.standard.set(exportFolder, forKey: "exportFolder") } }
-    @Published var wikiEnabled: Bool { didSet { UserDefaults.standard.set(wikiEnabled, forKey: "wikiEnabled") } }
     @Published var chargingOnly: Bool { didSet { UserDefaults.standard.set(chargingOnly, forKey: "chargingOnly"); pump() } }
     @Published var recordMode = "post"   // post(녹음 후 처리) / live(2단계, 아직 없음)
     @Published var recordingJobID: UUID?
@@ -24,8 +27,6 @@ final class Store: ObservableObject {
     @Published var elapsed: TimeInterval = 0
     @Published var message: String?
     @Published var transcriptRevision = 0
-    /// 녹음을 고르지 않은 채 넣은 자료: 다음 녹음에 연결한다.
-    @Published var pendingAttachments: [Attachment] = []
 
     private var recorder: AVAudioRecorder?
     private var recordURL: URL?
@@ -33,6 +34,7 @@ final class Store: ObservableObject {
     private var recordTimer: Timer?
     private var runningID: UUID?
     private var runningProcess: Process?
+    private var _recordTarget: UUID?
 
     private init() {
         let args = CommandLine.arguments
@@ -46,7 +48,6 @@ final class Store: ObservableObject {
         enginePath = value("--engine") ?? d.string(forKey: "enginePath") ?? "/Users/DH_WEST/LocalAI_Project/voice"
         exportEnabled = value("--export-dir") != nil ? true : d.bool(forKey: "exportEnabled")
         exportFolder = value("--export-dir") ?? d.string(forKey: "exportFolder") ?? ""
-        wikiEnabled = args.contains("--wiki-enabled") ? true : d.object(forKey: "wikiEnabled") as? Bool ?? true   // --wiki-enabled: 디버그용
         selectedProfile = value("--profile") ?? d.string(forKey: "profile") ?? "전력전자"
         chargingOnly = d.bool(forKey: "chargingOnly")
 
@@ -54,6 +55,8 @@ final class Store: ObservableObject {
         Profiles.ensureDefaults()
         reloadProfiles()
         loadState()
+        loadSessions()
+        selectedSessionID = d.string(forKey: "selectedSession").flatMap(UUID.init(uuidString:)).flatMap { id in sessions.first { $0.id == id }?.id }
         log("launch args=\(args.dropFirst())")
         if let v = value("--chat-engine"), let e = ChatEngine(rawValue: v) { ChatSettings.shared.engine = e }
         if args.contains("--charging-only") { chargingOnly = true }
@@ -78,19 +81,6 @@ final class Store: ObservableObject {
         // 디버그: --enqueue <file> (여러 번 가능)
         var files: [String] = []
         for (i, a) in args.enumerated() where a == "--enqueue" && i + 1 < args.count { files.append(args[i + 1]) }
-        if let probe = value("--material-probe") {
-            let v = ChatSettings.shared.vaultPath
-            let pre = Materials.prefixes(course: Profiles.course(for: selectedProfile), vault: v)
-            print("course=\(Profiles.course(for: selectedProfile) ?? "-") prefixes=\(pre)")
-            MaterialIndex.shared.ensureBuilt(vault: v) {
-                let t = (try? String(contentsOfFile: probe, encoding: .utf8)) ?? ""
-                let ls = ChatContext.transcriptLines(job: Job(audioPath: "", title: "", createdAt: Date(), duration: nil, profile: "", status: .done, transcriptPath: probe))
-                let text = ls.isEmpty ? t : ls.map(\.text).joined(separator: "\n")
-                print("with course:", MaterialIndex.shared.pick(text: text, prefixes: pre).map(\.name))
-                print("no profile :", MaterialIndex.shared.pick(text: text, prefixes: []).map(\.name))
-                exit(0)
-            }
-        }
         // 디버그: --import-material <파일> --import-course <과목> (확인 창 없이 자료 넣기)
         if let f = value("--import-material"), let c = value("--import-course") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -102,33 +92,54 @@ final class Store: ObservableObject {
                 }
             }
         }
-        let seedT = value("--seed-done"), seedA = value("--seed-audio")
-        let chatQ = value("--chat-ask"), chatMat = value("--chat-materials")
+        if args.contains("--no-goodnotes") { MaterialImporter.debugNoGoodnotes = true }
+        // 디버그: --seed-session <대본.md[,대본2.md…]> --seed-audio <오디오[,오디오2…]> [--seed-title 제목]
+        //   처리 없이 완료된 녹음 여러 개를 가진 노트를 만든다(--seed-done은 같은 뜻의 옛 이름). 대본 파일은 복사하지 않고 그대로 가리킨다.
+        let seedT = value("--seed-session") ?? value("--seed-done"), seedA = value("--seed-audio"), seedTitle = value("--seed-title")
+        let chatQ = value("--chat-ask")
+        let snapshot = value("--snapshot"), snapAfter = Double(value("--snapshot-after") ?? "") ?? 5
+        let selectTitle = value("--select-session")
+        let wikiSend = args.contains("--wiki-send")
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 for f in files { self.enqueue(URL(fileURLWithPath: f)) }
-                // 디버그: 처리 없이 완료된 작업을 만든다(채팅/노트 시험용)
                 if let t = seedT, let a = seedA {
-                    var job = Job(audioPath: a, title: "시험 " + ((t as NSString).lastPathComponent), createdAt: Date(),
-                                  duration: (try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: a)))?.duration, profile: self.selectedProfile)
-                    job.status = .done; job.transcriptPath = t
-                    self.jobs.insert(job, at: 0); self.selectedID = job.id; self.saveState()
-                    if let q = chatQ {
-                        let sess = ChatHub.shared.session(for: job.id)
-                        if let m = chatMat { sess.materials = m.split(separator: ",").map(String.init); sess.manualMaterials = true }
-                        else { sess.refreshAutoMaterials(job: job, force: true) }
-                        // 색인이 끝날 시간을 준 뒤 질문
-                        MaterialIndex.shared.ensureBuilt(vault: ChatSettings.shared.vaultPath) {
-                            MainActor.assumeIsolated {
-                                sess.refreshAutoMaterials(job: job, force: false)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    MainActor.assumeIsolated { sess.ask(q, job: job, organize: q == "ORGANIZE") }
-                                }
-                            }
+                    let ts = t.split(separator: ",").map(String.init), au = a.split(separator: ",").map(String.init)
+                    var ids: [UUID] = []
+                    for (i, tp) in ts.enumerated() {
+                        let ap = au[min(i, au.count - 1)]
+                        var job = Job(audioPath: ap, title: "시험 " + ((tp as NSString).lastPathComponent), createdAt: Date().addingTimeInterval(Double(i)),
+                                      duration: (try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: ap)))?.duration, profile: self.selectedProfile)
+                        job.status = .done; job.transcriptPath = tp
+                        self.jobs.insert(job, at: 0); ids.append(job.id)
+                    }
+                    self.saveState()
+                    let sess = self.newSession(title: seedTitle ?? "시험 노트")
+                    self.updateSession(sess.id) { $0.recordingIDs = ids; if seedTitle != nil { $0.titleIsAuto = false } }
+                    if let q = chatQ, let s = self.session(sess.id) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            MainActor.assumeIsolated { ChatHub.shared.session(for: s.id).ask(q, session: s, organize: q == "ORGANIZE") }
                         }
                     }
                 }
+                if let ts = selectTitle, let s = self.sessions.first(where: { $0.title.contains(ts) }) { self.selectedSessionID = s.id }
+                if wikiSend, let id = self.selectedSessionID {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { WikiSender.send(id) } }
+                }
+                // 디버그: --debug-project <이름>  새 프로젝트를 만들고 선택한 노트를 그 안으로 옮긴다(끌어다 놓기와 같은 store 함수).
+                if let pn = value("--debug-project"), let sid = self.selectedSessionID {
+                    let p = self.projects.first { $0.name == pn } ?? self.newProject(pn)
+                    self.move(session: sid, to: p.id)
+                    self.log("debug project \(pn) moved \(sid)")
+                }
+                // 디버그: --debug-jump <화자>  화자 칩이 가려는 줄을 로그로 남긴다(재생하지 않음).
+                if let sp = value("--debug-jump"), let s = self.selectedSession {
+                    let ls = self.combinedTranscript(of: s).lines
+                    let a = self.nextLine(of: sp, after: 0, in: ls), b = self.nextLine(of: sp, after: a?.time ?? 0, in: ls)
+                    self.log("debug jump from 0 -> \(a.map { formatTime($0.time) } ?? "-"), then -> \(b.map { formatTime($0.time) } ?? "-")")
+                }
+                if let snap = snapshot { DebugSnapshot.schedule(path: snap, after: snapAfter, quit: args.contains("--snapshot-quit")) }
                 self.pump()
                 AutoPreprocess.shared.start(debugDryRunNow: args.contains("--autopreprocess-dry-run-now"))
             }
@@ -165,7 +176,7 @@ final class Store: ObservableObject {
         }
     }
 
-    private func saveState() {
+    func saveState() {
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = [.prettyPrinted]
         if let d = try? enc.encode(jobs) { try? d.write(to: Paths.stateFile, options: .atomic) }
     }
@@ -184,7 +195,16 @@ final class Store: ObservableObject {
 
     func toggleRecording() { isRecording ? stopRecording() : startRecording() }
 
-    func startRecording() {
+    /// 단축키·메뉴바·빈 화면 녹음: 지금 연 노트가 오늘 것이면 이어서, 아니면 새 노트.
+    func startRecording(into session: UUID? = nil, forceNew: Bool = false) {
+        if forceNew { _recordTarget = nil }
+        else if let session { _recordTarget = session }
+        else if let s = selectedSession, Calendar.current.isDateInToday(s.createdAt) || s.recordingIDs.isEmpty { _recordTarget = s.id }
+        else { _recordTarget = nil }
+        requestMicAndRecord()
+    }
+
+    private func requestMicAndRecord() {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: beginRecording()
         case .notDetermined:
@@ -200,7 +220,7 @@ final class Store: ObservableObject {
     }
 
     private func micDenied() {
-        message = "마이크 권한이 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 VoiceNote를 허용해 주세요."
+        message = "마이크 권한이 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 VNote를 허용해 주세요."
         log("mic denied")
     }
 
@@ -221,10 +241,12 @@ final class Store: ObservableObject {
             recorder = r; recordURL = url; recordStart = Date()
             isRecording = true; elapsed = 0; message = nil
             // 녹음 중에도 노트를 쓸 수 있도록 작업을 바로 만든다(status=recording).
-            var job = Job(audioPath: url.path, title: "녹음 " + titleDate(Date()), createdAt: Date(), duration: nil, profile: selectedProfile)
+            let target = session(_recordTarget) ?? newSession()
+            var job = Job(audioPath: url.path, title: "녹음 " + titleDate(Date()), createdAt: Date(), duration: nil, profile: target.profile)
             job.status = .recording
-            if !pendingAttachments.isEmpty { job.attachments = pendingAttachments; pendingAttachments = [] }
-            jobs.insert(job, at: 0); selectedID = job.id; recordingJobID = job.id; saveState()
+            jobs.insert(job, at: 0); recordingJobID = job.id; saveState()
+            updateSession(target.id) { $0.recordingIDs.append(job.id) }
+            selectedSessionID = target.id
             trackPower(job.id)
             recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
                 MainActor.assumeIsolated {
@@ -256,19 +278,6 @@ final class Store: ObservableObject {
         }
     }
 
-    /// 지금 이 작업에서 새 노트 줄에 붙일 시각(초): 녹음 중이면 경과 시간, 재생 중이면 재생 위치.
-    func notePosition(for job: Job) -> Double? {
-        if job.status == .recording, recordingJobID == job.id, let st = recordStart { return Date().timeIntervalSince(st) }
-        let p = AudioPlayer.shared
-        if p.loadedPath == job.audioPath { return p.currentTime }
-        return nil
-    }
-
-    func seek(job: Job, to sec: Double) {
-        guard job.status != .recording else { return }
-        AudioPlayer.shared.play(path: job.audioPath, from: sec)
-    }
-
     func trackPower(_ id: UUID) {
         let j = jobs.first { $0.id == id }
         PowerMonitor.shared.begin(id, priorSumW: j?.powerSumW, priorN: j?.powerSamples, priorUsed: j?.batteryUsedPct)
@@ -280,20 +289,22 @@ final class Store: ObservableObject {
 
     // MARK: - 큐
 
-    func enqueue(_ url: URL, title: String? = nil) {
+    /// 오디오 파일을 노트에 넣고 처리 큐에 올린다. 노트를 정하지 않으면 파일마다 새 노트를 만든다.
+    func enqueue(_ url: URL, title: String? = nil, into sessionID: UUID? = nil) {
         let dur = (try? AVAudioPlayer(contentsOf: url))?.duration
-        let job = Job(audioPath: url.path,
-                      title: title ?? url.deletingPathExtension().lastPathComponent,
-                      createdAt: Date(), duration: dur, profile: selectedProfile)
+        let name = title ?? url.deletingPathExtension().lastPathComponent
+        let target = session(sessionID) ?? newSession(title: name)
+        let job = Job(audioPath: url.path, title: name, createdAt: Date(), duration: dur, profile: target.profile)
         jobs.insert(job, at: 0)
-        selectedID = job.id
+        updateSession(target.id) { $0.recordingIDs.append(job.id) }
+        selectedSessionID = target.id
         saveState()
         log("enqueue \(url.path) profile=\(selectedProfile)")
         pump()
     }
 
-    func importFiles(_ urls: [URL]) {
-        for u in urls.reversed() where audioExtensions.contains(u.pathExtension.lowercased()) { enqueue(u) }
+    func importFiles(_ urls: [URL], into sessionID: UUID? = nil) {
+        for u in urls where audioExtensions.contains(u.pathExtension.lowercased()) { enqueue(u, into: sessionID) }
     }
 
     func retry(_ id: UUID) {
@@ -308,8 +319,8 @@ final class Store: ObservableObject {
         }
         if runningID == id { runningProcess?.terminate() }
         jobs.removeAll { $0.id == id }
-        if selectedID == id { selectedID = nil }
-        saveState()
+        for i in sessions.indices { sessions[i].recordingIDs.removeAll { $0 == id } }
+        saveState(); saveSessions()
     }
 
     func pump() {
@@ -333,7 +344,15 @@ final class Store: ObservableObject {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: py)
         var pargs = [script, "transcribe", job.audioPath]
-        if !job.profile.isEmpty { pargs += ["--profile", job.profile] }   // 비어 있으면 '자동(프로필 없음)'
+        let sess = session(ofJob: job.id)
+        let profile = sess?.profile ?? job.profile
+        if !profile.isEmpty { pargs += ["--profile", profile] }   // 비어 있으면 '자동(프로필 없음)'
+        if let sess, !sess.terms.isEmpty {
+            let tf = Paths.support.appendingPathComponent("terms/\(sess.id.uuidString).txt")
+            try? FileManager.default.createDirectory(at: tf.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? sess.terms.joined(separator: "\n").write(to: tf, atomically: true, encoding: .utf8)
+            pargs += ["--terms-file", tf.path]
+        }
         pargs += ["--json-progress", "--out", Paths.transcripts.path]
         p.arguments = pargs
         p.currentDirectoryURL = URL(fileURLWithPath: engine)
@@ -408,8 +427,9 @@ final class Store: ObservableObject {
                 update(id) { $0.status = .done; $0.stage = nil; $0.error = nil }
                 transcriptRevision += 1
                 export(path: path)
-                if wikiEnabled, job.wikiPath.map({ !FileManager.default.fileExists(atPath: $0) }) ?? true {
-                    sendToWiki(id, manual: false)
+                // 첫 녹음 처리가 끝났을 때만 AI 제목을 짓는다(자료를 먼저 붙여 지은 제목이 있으면 그대로 두고 대본으로 다시 짓는다).
+                if let s = session(ofJob: id), s.titleIsAuto, recordings(of: s).filter({ $0.status == .done }).count == 1 {
+                    AITasks.shared.makeTitle(session: s.id)
                 }
                 log("job done \(path)")
             } else {
@@ -442,64 +462,16 @@ final class Store: ObservableObject {
         }
     }
 
-    /// 대본을 프로필의 위키 transcript 폴더에 새 파일로 복사한다(덮어쓰기 없음, 다른 파일은 건드리지 않음).
-    func sendToWiki(_ id: UUID, manual: Bool) {
-        guard let job = jobs.first(where: { $0.id == id }), let src = job.transcriptPath,
-              FileManager.default.fileExists(atPath: src) else { return }
-        guard let t = Profiles.wikiTarget(for: job.profile) else {
-            if manual {
-                message = job.profile.isEmpty
-                    ? "이 녹음에는 과목 프로필이 없어서 어느 위키 폴더로 보낼지 모릅니다. 제목 아래 주황색 '프로필 없음'을 눌러 과목을 고른 뒤 다시 보내 주세요."
-                    : "프로필 '\(job.profile)'에 위키 과목 폴더가 없습니다. 프로필을 고쳐 과목 폴더를 정해 주세요."
-            }
-            return
-        }
-        var isDir: ObjCBool = false
-        // 과목 폴더는 있는데 transcript/만 없으면 만든다.
-        let parent = (t.dir as NSString).deletingLastPathComponent
-        if !FileManager.default.fileExists(atPath: t.dir), FileManager.default.fileExists(atPath: parent) {
-            try? FileManager.default.createDirectory(atPath: t.dir, withIntermediateDirectories: false)
-        }
-        guard FileManager.default.fileExists(atPath: t.dir, isDirectory: &isDir), isDir.boolValue else {
-            log("wiki dir missing \(t.dir)")
-            if manual { message = "위키 폴더가 없습니다: \(t.dir)" }
-            return
-        }
-        let meta = TranscriptIO.load(path: src)?.meta ?? [:]
-        let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX"); df.dateFormat = "yyyy-MM-dd HH:mm"
-        let when = meta["date"].flatMap { df.date(from: $0) } ?? job.createdAt
-        let nf = DateFormatter(); nf.locale = Locale(identifier: "en_US_POSIX"); nf.dateFormat = "yyyy-MM-dd HHmm"
-        func clean(_ s: String) -> String {
-            s.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        }
-        let base = "\(clean(t.course)) \(nf.string(from: when)) \(clean(job.title))"
-        let dir = URL(fileURLWithPath: t.dir)
-        var dest = dir.appendingPathComponent(base + ".md"); var n = 2
-        while FileManager.default.fileExists(atPath: dest.path) {
-            dest = dir.appendingPathComponent("\(base) (\(n)).md"); n += 1
-        }
-        do {
-            try FileManager.default.copyItem(at: URL(fileURLWithPath: src), to: dest)
-            update(id) { $0.wikiPath = dest.path }
-            log("wiki sent \(dest.path)")
-            AutoPreprocess.shared.scheduleAfterWikiSend()
-        } catch {
-            message = "위키로 보내기 실패: \(error.localizedDescription)"
-        }
-    }
-
-    func renameSpeaker(job: Job, from: String, to: String) {
+    /// 화자 이름을 노트의 모든 녹음 대본에서 바꾼다(위키로 보낸 묶음은 다시 보내야 반영).
+    func renameSpeaker(session s: Session, from: String, to: String) {
         let name = to.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let path = job.transcriptPath, !name.isEmpty, !name.contains("\n"), name != from else { return }
+        guard !name.isEmpty, !name.contains("\n"), name != from else { return }
         do {
-            try TranscriptIO.renameSpeaker(path: path, from: from, to: name)
-            transcriptRevision += 1
-            export(path: path)
-            if let wp = job.wikiPath, FileManager.default.fileExists(atPath: wp) {
-                // 앱이 새로 만든 위키 사본만 고친다(다른 raw 파일은 건드리지 않음)
-                try TranscriptIO.renameSpeaker(path: wp, from: from, to: name)
+            for j in recordings(of: s) {
+                if let p = j.transcriptPath { try TranscriptIO.renameSpeaker(path: p, from: from, to: name) }
             }
-            log("rename speaker \(from) -> \(name) in \(path)")
+            transcriptRevision += 1
+            log("rename speaker \(from) -> \(name) in session \(s.id)")
         } catch {
             message = "화자 이름 변경 실패: \(error.localizedDescription)"
         }

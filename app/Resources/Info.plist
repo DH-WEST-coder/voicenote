@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key><string>local.voicenote</string>
-    <key>CFBundleName</key><string>VoiceNote</string>
-    <key>CFBundleDisplayName</key><string>VoiceNote</string>
+    <key>CFBundleName</key><string>VNote</string>
+    <key>CFBundleDisplayName</key><string>VNote</string>
     <key>CFBundleExecutable</key><string>VoiceNote</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -13,7 +13,7 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>PPT 강의자료를 PowerPoint로 PDF로 바꿀 때 사용합니다.</string>
-    <key>NSMicrophoneUsageDescription</key><string>회의/강의 녹음을 위해 마이크를 사용합니다.</string>
+    <key>NSAppleEventsUsageDescription</key><string>VNote가 PPT 강의자료를 PowerPoint로 PDF로 바꿀 때 사용합니다.</string>
+    <key>NSMicrophoneUsageDescription</key><string>VNote가 회의/강의 녹음을 위해 마이크를 사용합니다.</string>
 </dict>
 </plist>

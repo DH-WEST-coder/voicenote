@@ -20,7 +20,7 @@ final class AutoPreprocess: ObservableObject {
     /// 접근 거부(TCC)로 보이는 경우의 한 줄 경고. 다음 성공 실행 때 지워진다.
     @Published private(set) var accessWarning: String?
 
-    static let accessMessage = "Google Drive 폴더에 접근할 수 없습니다. 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더(또는 전체 디스크 접근 권한)에서 VoiceNote를 허용하세요."
+    static let accessMessage = "Google Drive 폴더에 접근할 수 없습니다. 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더(또는 전체 디스크 접근 권한)에서 VNote를 허용하세요."
 
     private var timer: Timer?
     private var wikiTimer: Timer?

@@ -22,4 +22,4 @@ if [ "$1" = "--bench" ] && [ ! -d models ]; then
 fi
 
 (cd app && ./build.sh)
-echo "완료: open app/build/VoiceNote.app"
+echo "완료: open app/build/VNote.app"

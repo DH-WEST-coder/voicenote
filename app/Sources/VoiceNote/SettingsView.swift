@@ -34,6 +34,9 @@ struct SettingsView: View {
                     TextField("모델 (비우면 로드된 첫 모델)", text: $chat.lmModel)
                 }
                 Toggle("위키 vault를 읽기 전용으로 붙여 엔진이 직접 더 찾게 하기", isOn: $chat.attachVault)
+                Toggle("자료 페이지 이미지 보내기", isOn: $chat.sendPageImages)
+                Text("글자가 적은 자료 페이지(그림·수식 위주)를 이미지로 최대 8장 함께 보냅니다. Codex·Gemini만 지원, LM Studio는 보내지 않습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Stepper("대본 글자 수 상한: \(chat.transcriptCap)", value: $chat.transcriptCap, in: 5000...300000, step: 5000)
                 Stepper("강의자료 글자 수 상한: \(chat.materialCap)", value: $chat.materialCap, in: 10000...400000, step: 10000)
                 Stepper("항상 전부 보내는 최근 구간: \(chat.recentMinutes)분", value: $chat.recentMinutes, in: 1...60)
@@ -70,8 +73,13 @@ struct SettingsView: View {
                 }
                 Text("vault 위치는 여기 한 곳(config.json)에서만 바꿉니다. 프로필 wiki_dir은 vault 기준 상대경로입니다. 채팅·자동 전처리·엔진이 모두 이 값을 씁니다.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("위키로 자동 보내기", isOn: $store.wikiEnabled)
-                Text("완료되면 프로필의 wiki_dir(과목 transcript 폴더)에 '<과목> <날짜 시각> <제목>.md'로 새 파일을 추가합니다. 기존 파일은 덮어쓰지 않습니다.")
+                DatePicker("학기 시작일", selection: Binding(get: { vault.semesterStartDate }, set: { vault.setSemesterStart($0) }),
+                           displayedComponents: .date)
+                Text("노트 제목의 'N주차' 계산에 씁니다(시작일이 1주차 첫날).").font(.caption).foregroundStyle(.secondary)
+                Toggle("위키 본문 참고", isOn: $chat.wikiRefEnabled)
+                Stepper("위키 참고 글자 수 상한: \(chat.wikiCap)", value: $chat.wikiCap, in: 5000...200000, step: 5000)
+                    .disabled(!chat.wikiRefEnabled)
+                Text("AI 채팅 질문마다 wiki/ 에서 관련 페이지 최대 4개를 골라 맥락에 넣습니다(읽기 전용, 위키는 고치지 않음). 노트는 '위키로 보내기' 버튼을 눌러야 위키로 갑니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("위키 자동 전처리") {

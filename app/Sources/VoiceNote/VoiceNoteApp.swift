@@ -7,7 +7,7 @@ struct VoiceNoteApp: App {
 
     var body: some Scene {
         // 첫 씬이 실행 시 자동으로 열린다. Dock 아이콘을 누르면 다시 열린다.
-        Window("VoiceNote", id: "main") {
+        Window("VNote", id: "main") {
             MainWindow().environmentObject(store)
         }
         .defaultSize(width: 1180, height: 760)
@@ -56,6 +56,8 @@ struct MenuContent: View {
         }
         .keyboardShortcut("r", modifiers: [.option, .command])
 
+        Button("새 노트") { store.newSession(); show("main") }
+
         Picker("프로필", selection: $store.selectedProfile) {
             Text("자동(프로필 없음)").tag("")
             ForEach(store.profiles, id: \.self) { Text($0).tag($0) }
@@ -75,7 +77,7 @@ struct MenuContent: View {
         Text(ap.menuLine)
         if ap.accessWarning != nil { Text("⚠︎ Google Drive 접근 권한 필요 (설정 참고)") }
         Divider()
-        Button("목록 창 열기") { show("main") }
+        Button("VNote 열기") { show("main") }
         Button("파일 가져오기…") { show("main"); MaterialImporter.shared.showPicker = true }
         Button("설정…") { show("settings") }
         Divider()

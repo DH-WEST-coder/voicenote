@@ -142,7 +142,7 @@ struct MaterialImportSheet: View {
                 Text("Goodnotes에 불러오기 창이 뜨면 확인을 눌러 주세요. Goodnotes에서 \(importer.course.isEmpty ? "과목" : importer.course) 폴더를 열어 두면 그 위치로 들어갑니다. PPT는 PowerPoint로 PDF를 만들어 보냅니다(처음 한 번 폴더 접근 허용 필요).")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Label(importer.targetJob.map { "연결할 녹음: \($0.title)" } ?? "연결할 녹음: 다음에 시작하는 녹음", systemImage: "link")
+            Label(importer.targetSession.map { "연결할 노트: \($0.title)" } ?? "새 노트를 만듭니다", systemImage: "link")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
@@ -187,22 +187,22 @@ struct QuickLookView: NSViewRepresentable {
 /// 가운데 위쪽: 자료가 있으면 [대본 | 자료…] 탭
 struct TopPane: View {
     @ObservedObject var tabs = MaterialTabs.shared
-    let job: Job
+    let session: Session
 
     var body: some View {
-        let atts = job.attachments ?? []
+        let atts = session.attachments
         if atts.isEmpty {
-            TranscriptView(job: job)
+            TranscriptView(session: session)
         } else {
-            let sel = tabs.selection[job.id] ?? nil
+            let sel = tabs.selection[session.id] ?? nil
             let current = atts.first { $0.id == sel }
             VStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
-                        tab("대본", icon: "text.alignleft", on: current == nil) { tabs.show(job: job.id, attachment: nil) }
+                        tab("대본", icon: "text.alignleft", on: current == nil) { tabs.show(session: session.id, attachment: nil) }
                         ForEach(atts) { a in
                             tab(a.name, icon: a.isPDF ? "doc.richtext" : "rectangle.on.rectangle.angled", on: current?.id == a.id) {
-                                tabs.show(job: job.id, attachment: a.id)
+                                tabs.show(session: session.id, attachment: a.id)
                             }
                             .contextMenu {
                                 Button("Finder에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: a.path)]) }
@@ -212,9 +212,10 @@ struct TopPane: View {
                                     }
                                 }
                                 Divider()
-                                Button("이 녹음에서 연결 해제") {
-                                    Store.shared.update(job.id) { $0.attachments?.removeAll { $0.id == a.id } }
-                                    tabs.show(job: job.id, attachment: nil)
+                                Button("이 노트에서 연결 해제") {
+                                    HoldList.remove(a)
+                                    Store.shared.updateSession(session.id) { $0.attachments.removeAll { $0.id == a.id } }
+                                    tabs.show(session: session.id, attachment: nil)
                                 }
                             }
                         }
@@ -226,7 +227,7 @@ struct TopPane: View {
                 if let a = current {
                     if let pdf = a.viewPDF { PDFKitView(path: pdf) } else { QuickLookView(path: a.path) }
                 } else {
-                    TranscriptView(job: job)
+                    TranscriptView(session: session)
                 }
             }
         }

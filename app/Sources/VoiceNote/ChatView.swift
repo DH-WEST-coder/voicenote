@@ -9,7 +9,7 @@ final class ChatUI: ObservableObject {
 struct ChatView: View {
     @EnvironmentObject var store: Store
     @ObservedObject var settings = ChatSettings.shared
-    let job: Job
+    let note: Session
     @ObservedObject var session: ChatSession
     @StateObject private var ui = ChatUI()
     @ObservedObject private var catalog = ModelCatalog.shared
@@ -39,8 +39,6 @@ struct ChatView: View {
             .background(.bar)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { session.refreshAutoMaterials(job: job) }
-        .onChange(of: job.status) { _ in session.refreshAutoMaterials(job: job) }
     }
 
     private var header: some View {
@@ -78,7 +76,7 @@ struct ChatView: View {
             .onAppear { catalog.load() }
             Button { session.clear() } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless)
-                .help("이 세션의 채팅 기록 지우기").disabled(session.busy || session.messages.isEmpty)
+                .help("이 노트의 채팅 기록 지우기").disabled(session.busy || session.messages.isEmpty)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -91,7 +89,7 @@ struct ChatView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "sparkles").font(.system(size: 30)).foregroundStyle(.tertiary)
                             Text("수업에 대해 물어보세요").font(.headline)
-                            Text("대본, 내 노트, 관련 강의자료가 함께 전달됩니다.\n아래 버튼으로 바로 정리할 수도 있어요.")
+                            Text("대본, 내 노트, 이 노트의 강의자료, 관련 위키 페이지가 함께 전달됩니다.\n아래 버튼으로 바로 정리할 수도 있어요.")
                                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity).padding(.top, 60)
@@ -104,62 +102,50 @@ struct ChatView: View {
                 }
                 .padding(16)
             }
-            .onChange(of: session.messages.last?.text) { _ in
+            .onChange(of: session.messages.last?.text) { _, _ in
                 if let id = session.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
             }
         }
     }
 
-    private var materialsBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Label(session.manualMaterials ? "강의자료 · 직접 고름" : "강의자료 · 자동", systemImage: "books.vertical")
+    /// 이 노트에 넣은 자료 칩(누르면 그 자료 탭으로)
+    @ViewBuilder private var materialsBar: some View {
+        if !note.attachments.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("이 노트의 자료 · 질문에 함께 전달", systemImage: "doc.richtext")
                     .font(.caption).foregroundStyle(.secondary)
-                if session.materials.isEmpty { Text("없음").font(.caption).foregroundStyle(.tertiary) }
-                Spacer()
-                if session.manualMaterials {
-                    Button("자동으로 다시") { session.refreshAutoMaterials(job: job, force: true) }.controlSize(.mini)
-                }
-            }
-            if !session.materials.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(session.materials, id: \.self) { n in
-                            HStack(spacing: 3) {
-                                Text(shortName(n)).lineLimit(1)
-                                Button { session.removeMaterial(n) } label: { Image(systemName: "xmark.circle.fill") }
-                                    .buttonStyle(.plain)
+                        ForEach(note.attachments) { a in
+                            Button { MaterialTabs.shared.show(session: note.id, attachment: a.id) } label: {
+                                Text(a.name).lineLimit(1).truncationMode(.middle).frame(maxWidth: 200)
+                                    .font(.caption2).padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.15), in: Capsule())
                             }
-                            .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                            .help(n)
+                            .buttonStyle(.plain).help(a.name)
                         }
                     }
                 }
             }
+            .padding(.horizontal, 14).padding(.top, 10)
         }
-        .padding(.horizontal, 14).padding(.top, 10)
-    }
-
-    private func shortName(_ n: String) -> String {
-        n.replacingOccurrences(of: ".processed.md", with: "")
     }
 
     private var quickBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                Button { session.ask(ui.prompts.organize, job: job, organize: true) } label: {
+                Button { session.ask(ui.prompts.organize, session: note, organize: true) } label: {
                     Label("수업 정리", systemImage: "doc.text.magnifyingglass")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.small)
-                .help("대본 + 관련 자료로 구조화된 노트 작성")
-                Button { session.ask(NotePrompts.fill, job: job, display: "내 노트 기준으로 보충") } label: {
+                .help("대본 + 자료 + 위키 참고로 구조화된 노트 작성")
+                Button { session.ask(NotePrompts.fill, session: note, display: "내 노트 기준으로 보충") } label: {
                     Label("노트 보충", systemImage: "note.text.badge.plus")
                 }
                 .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
                 .help("내 노트를 기준으로 대본·자료에서 빠진 내용을 채움 (노트에서 글을 골라 우클릭해도 됩니다)")
                 ForEach(ui.prompts.quick) { q in
-                    Button(q.label) { session.ask(q.prompt, job: job) }
+                    Button(q.label) { session.ask(q.prompt, session: note) }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
                 }
             }
@@ -200,7 +186,7 @@ struct ChatView: View {
         let q = ui.input
         guard !session.busy, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         ui.input = ""
-        session.ask(q, job: job)
+        session.ask(q, session: note)
     }
 }
 
@@ -248,6 +234,9 @@ struct MessageBubble: View {
                 }
                 .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
                 .padding(.leading, 4)
+                if let refs = message.wikiRefs, !refs.isEmpty {
+                    WikiRefChips(refs: refs).padding(.leading, 4)
+                }
             }
         }
     }
@@ -255,57 +244,28 @@ struct MessageBubble: View {
     private var engineLabel: String { ChatEngine(rawValue: message.engine ?? "")?.label ?? "" }
 }
 
-/// 강의자료 직접 고르기(자동 선택을 덮어쓴다)
-final class MaterialsPickerState: ObservableObject {
-    @Published var filter = ""
-    @Published var files: [MaterialFile] = []
-    @Published var ready = false
-}
-
-struct MaterialsPicker: View {
-    let job: Job
-    @ObservedObject var session: ChatSession
-    @StateObject private var st = MaterialsPickerState()
-
+/// 답변 아래 "참고한 위키: 이름, 이름" 칩. 누르면 Finder에서 보여 준다(읽기 전용, 열기만).
+struct WikiRefChips: View {
+    let refs: [String]
     var body: some View {
-        let course = Profiles.course(for: job.profile)
-        let prefixes = Materials.prefixes(course: course, vault: ChatSettings.shared.vaultPath)
-        let filtered = st.files.filter { st.filter.isEmpty || $0.name.localizedCaseInsensitiveContains(st.filter) }
-        let mine = filtered.filter { f in prefixes.contains { f.name.hasPrefix($0 + "_") } }
-        let others = filtered.filter { f in !mine.contains(f) }
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("강의자료").font(.headline)
-                Spacer()
-                Button("자동으로 다시 고르기") { session.refreshAutoMaterials(job: job, force: true) }
-            }
-            Text(session.manualMaterials ? "직접 고른 자료만 사용합니다." : "대본 키워드로 자동 선택됨. 바꾸면 직접 고른 목록이 됩니다.")
-                .font(.caption).foregroundStyle(.secondary)
-            TextField("파일 이름 검색", text: $st.filter).textFieldStyle(.roundedBorder)
-            if !st.ready { ProgressView("자료 색인 중…").controlSize(.small) }
-            List {
-                if !mine.isEmpty {
-                    Section(course.map { "과목: \($0)" } ?? "이 과목") { ForEach(mine) { row($0) } }
-                }
-                Section(mine.isEmpty ? "전체" : "다른 자료") { ForEach(others) { row($0) } }
-            }
-            .frame(width: 440, height: 340)
-        }
-        .padding(12)
-        .onAppear {
-            MaterialIndex.shared.ensureBuilt(vault: ChatSettings.shared.vaultPath) {
-                st.files = MaterialIndex.shared.allFiles(); st.ready = true
+        HStack(spacing: 5) {
+            Image(systemName: "books.vertical").font(.caption2)
+            Text("참고한 위키:").font(.caption2)
+            ForEach(refs, id: \.self) { r in
+                Button(((r as NSString).lastPathComponent as NSString).deletingPathExtension) { open(r) }
+                    .buttonStyle(.plain)
+                    .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.green.opacity(0.14), in: Capsule())
+                    .help(r)
             }
         }
+        .foregroundStyle(.secondary)
     }
 
-    private func row(_ f: MaterialFile) -> some View {
-        Toggle(isOn: Binding(get: { session.materials.contains(f.name) }, set: { _ in session.toggleMaterial(f.name) })) {
-            HStack {
-                Text(f.name.replacingOccurrences(of: ".processed.md", with: "")).lineLimit(1)
-                Spacer()
-                Text("\(f.size / 1024)KB").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
+    private func open(_ rel: String) {
+        let url = URL(fileURLWithPath: VaultConfig.shared.vault).appendingPathComponent(rel)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        // Obsidian이 있으면 거기서, 없으면 Finder에서 보여 준다.
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }
