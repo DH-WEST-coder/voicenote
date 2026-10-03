@@ -1,0 +1,12 @@
+# 환경·의존성 (setup.sh로 다시 만든다)
+.venv/
+vendor/
+models/
+# 개인 녹음·대본·실험 결과
+audio/
+out/
+# 빌드 결과
+app/.build/
+app/build/
+.DS_Store
+__pycache__/

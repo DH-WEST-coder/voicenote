@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.llmwiki.autopreprocess</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/DH_WEST/Library/CloudStorage/GoogleDrive-hello430234@gmail.com/내 드라이브/04_LLMwiki/LLM WIKI for study/.agents/skills/source-processor/scripts/auto_preprocess.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/DH_WEST/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/DH_WEST</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/DH_WEST/Library/Logs/llmwiki-autopreprocess.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/DH_WEST/Library/Logs/llmwiki-autopreprocess.err.log</string>
+</dict>
+</plist>
