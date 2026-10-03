@@ -6,17 +6,18 @@ struct VoiceNoteApp: App {
     private let store = Store.shared
 
     var body: some Scene {
+        // 첫 씬이 실행 시 자동으로 열린다. Dock 아이콘을 누르면 다시 열린다.
+        Window("VoiceNote", id: "main") {
+            MainWindow().environmentObject(store)
+        }
+        .defaultSize(width: 1180, height: 760)
+
         MenuBarExtra {
             MenuContent().environmentObject(store)
         } label: {
             MenuLabel().environmentObject(store)
         }
         .menuBarExtraStyle(.menu)
-
-        Window("VoiceNote", id: "main") {
-            MainWindow().environmentObject(store)
-        }
-        .defaultSize(width: 980, height: 660)
 
         Window("설정", id: "settings") {
             SettingsView().environmentObject(store)
@@ -25,14 +26,9 @@ struct VoiceNoteApp: App {
     }
 }
 
-/// 실행 직후 SwiftUI Window 씬이 자동으로 뜨면 닫아서 메뉴바 앱처럼 시작한다.
+/// Dock 앱으로 동작한다. 창을 닫아도 메뉴바·녹음은 계속 돈다.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        if CommandLine.arguments.contains("--show-window") { return }
-        DispatchQueue.main.async {
-            for w in NSApp.windows where w.title == "VoiceNote" || w.title == "설정" { w.close() }
-        }
-    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
 struct MenuLabel: View {
@@ -91,12 +87,5 @@ struct MenuContent: View {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func pickFiles() {
-        let p = NSOpenPanel()
-        p.allowsMultipleSelection = true
-        p.canChooseDirectories = false
-        p.allowedContentTypes = [.audio, .movie]
-        NSApp.activate(ignoringOtherApps: true)
-        if p.runModal() == .OK { store.importFiles(p.urls) }
-    }
+    private func pickFiles() { pickAudioFiles(into: store) }
 }

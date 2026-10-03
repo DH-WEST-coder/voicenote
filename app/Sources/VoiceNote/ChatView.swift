@@ -18,28 +18,34 @@ struct ChatView: View {
             header
             Divider()
             messagesList
-            Divider()
-            materialsBar
-            quickBar
-            inputBar
+            VStack(spacing: 0) {
+                materialsBar
+                quickBar
+                inputBar
+            }
+            .background(.bar)
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.4))
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { session.refreshAutoMaterials(job: job) }
         .onChange(of: job.status) { _ in session.refreshAutoMaterials(job: job) }
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("AI 채팅", systemImage: "bubble.left.and.bubble.right").font(.subheadline.bold())
+            Label("AI 채팅", systemImage: "sparkles").font(.headline)
             Spacer()
-            Picker("", selection: $settings.engine) {
-                ForEach(ChatEngine.allCases) { Text($0.label).tag($0) }
-            }
-            .labelsHidden().frame(maxWidth: 190)
+            Menu {
+                Picker("엔진", selection: $settings.engine) {
+                    ForEach(ChatEngine.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.inline)
+            } label: { Text(settings.engine.label).font(.caption) }
+            .menuStyle(.borderlessButton).fixedSize()
             Button { session.clear() } label: { Image(systemName: "trash") }
+                .buttonStyle(.borderless)
                 .help("이 세션의 채팅 기록 지우기").disabled(session.busy || session.messages.isEmpty)
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     private var messagesList: some View {
@@ -47,8 +53,13 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if session.messages.isEmpty {
-                        Text("수업에 대해 물어보세요. 대본, 내 노트, 관련 강의자료가 함께 전달됩니다.\n예: \"이 수업 관련 내용 가져와서 정리해\"")
-                            .font(.callout).foregroundStyle(.secondary).padding(.top, 16)
+                        VStack(spacing: 10) {
+                            Image(systemName: "sparkles").font(.system(size: 30)).foregroundStyle(.tertiary)
+                            Text("수업에 대해 물어보세요").font(.headline)
+                            Text("대본, 내 노트, 관련 강의자료가 함께 전달됩니다.\n아래 버튼으로 바로 정리할 수도 있어요.")
+                                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.top, 60)
                     }
                     ForEach(session.messages) { m in
                         MessageBubble(message: m, streaming: session.busy && m.id == session.messages.last?.id,
@@ -56,7 +67,7 @@ struct ChatView: View {
                             .id(m.id)
                     }
                 }
-                .padding(12)
+                .padding(16)
             }
             .onChange(of: session.messages.last?.text) { _ in
                 if let id = session.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
@@ -67,8 +78,9 @@ struct ChatView: View {
     private var materialsBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(session.manualMaterials ? "자료(직접 고름)" : "자료(자동)").font(.caption2).foregroundStyle(.secondary)
-                if session.materials.isEmpty { Text("없음").font(.caption2).foregroundStyle(.tertiary) }
+                Label(session.manualMaterials ? "강의자료 · 직접 고름" : "강의자료 · 자동", systemImage: "books.vertical")
+                    .font(.caption).foregroundStyle(.secondary)
+                if session.materials.isEmpty { Text("없음").font(.caption).foregroundStyle(.tertiary) }
                 Spacer()
                 if session.manualMaterials {
                     Button("자동으로 다시") { session.refreshAutoMaterials(job: job, force: true) }.controlSize(.mini)
@@ -91,7 +103,7 @@ struct ChatView: View {
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.top, 6)
+        .padding(.horizontal, 14).padding(.top, 10)
     }
 
     private func shortName(_ n: String) -> String {
@@ -107,7 +119,8 @@ struct ChatView: View {
                 .buttonStyle(.borderedProminent).controlSize(.small)
                 .help("대본 + 관련 자료로 구조화된 노트 작성")
                 ForEach(ui.prompts.quick) { q in
-                    Button(q.label) { session.ask(q.prompt, job: job) }.controlSize(.small)
+                    Button(q.label) { session.ask(q.prompt, job: job) }
+                        .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -117,19 +130,30 @@ struct ChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        let empty = ui.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(alignment: .bottom, spacing: 8) {
             TextField("질문 입력 (Enter로 보내기)", text: $ui.input, axis: .vertical)
                 .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .onSubmit { send() }
+                .padding(.vertical, 6)
             if session.busy {
-                Button { session.stop() } label: { Image(systemName: "stop.circle.fill") }.help("중지")
+                Button { session.stop() } label: {
+                    Image(systemName: "stop.circle.fill").font(.title2).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help("중지")
             } else {
-                Button { send() } label: { Image(systemName: "paperplane.fill") }
-                    .disabled(ui.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button { send() } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                        .foregroundStyle(empty ? Color.secondary.opacity(0.5) : Color.accentColor)
+                }
+                .buttonStyle(.plain).disabled(empty)
             }
         }
-        .padding(12)
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 3)
+        .background(Theme.paneBackground, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.primary.opacity(0.12)))
+        .padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 2)
     }
 
     private func send() {
@@ -156,35 +180,39 @@ struct MessageBubble: View {
                 } else if isUser {
                     Text(message.text).textSelection(.enabled)
                 } else {
-                    Text(rendered).textSelection(.enabled)
+                    MarkdownText(text: message.text)
                 }
             }
-            .padding(10)
-            .background(isUser ? Color.accentColor.opacity(0.18) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, isUser ? 12 : 14).padding(.vertical, isUser ? 8 : 12)
+            .background(isUser ? Color.accentColor.opacity(0.16) : Theme.paneBackground,
+                        in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                if !isUser { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.07)) }
+            }
+            .padding(.leading, isUser ? 40 : 0)
             .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
 
             if !isUser && !streaming && !message.text.isEmpty && !message.isError {
                 HStack(spacing: 10) {
-                    Button("노트에 넣기") { NoteController.shared.insertAtCursor(message.text) }.controlSize(.small)
-                    Button("복사") {
+                    Button { NoteController.shared.insertAtCursor(message.text) } label: {
+                        Label("노트에 넣기", systemImage: "text.insert")
+                    }
+                    Button {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string)
-                    }.controlSize(.small)
+                    } label: { Label("복사", systemImage: "doc.on.doc") }
                     if let t = message.total {
                         Text(String(format: "%@ · 첫 응답 %@ · 총 %.1fs", engineLabel,
                                     message.ttft.map { String(format: "%.1fs", $0) } ?? "-", t))
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
+                .buttonStyle(.borderless).font(.caption).foregroundStyle(.secondary)
+                .padding(.leading, 4)
             }
         }
     }
 
     private var engineLabel: String { ChatEngine(rawValue: message.engine ?? "")?.label ?? "" }
-
-    private var rendered: AttributedString {
-        (try? AttributedString(markdown: message.text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.text)
-    }
 }
 
 /// 강의자료 직접 고르기(자동 선택을 덮어쓴다)

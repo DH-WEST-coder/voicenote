@@ -156,7 +156,7 @@ struct NoteEditor: NSViewRepresentable {
         tv.autoresizingMask = [.width]
         tv.isRichText = false; tv.allowsUndo = true
         tv.font = NSFont.systemFont(ofSize: 14)
-        tv.textContainerInset = NSSize(width: 8, height: 8)
+        tv.textContainerInset = NSSize(width: 12, height: 10)
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
@@ -206,19 +206,25 @@ struct NoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("내 노트", systemImage: "square.and.pencil").font(.subheadline.bold())
+            HStack(spacing: 8) {
+                Label("내 노트", systemImage: "square.and.pencil").font(.headline)
+                Text(hint).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                if let t = nc.savedAt { Text("저장됨 " + t.formatted(date: .omitted, time: .standard)).font(.caption2).foregroundStyle(.tertiary) }
-                Text(hint).font(.caption2).foregroundStyle(.secondary)
+                if let t = nc.savedAt {
+                    Label("저장됨 " + t.formatted(date: .omitted, time: .shortened), systemImage: "checkmark.circle")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            Divider()
+            .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 6)
             NoteEditor(jobID: job.id,
                        clock: { [store, job] in MainActor.assumeIsolated { store.notePosition(for: job) } },
                        onSeek: { [store, job] sec in MainActor.assumeIsolated { store.seek(job: job, to: sec) } })
                 .id(job.id)
+                .background(Theme.paneBackground, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+                .padding(.horizontal, 14).padding(.bottom, 14)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var hint: String {

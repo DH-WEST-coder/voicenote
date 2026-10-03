@@ -28,7 +28,9 @@ struct MainWindow: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $store.selectedID) {
-                ForEach(store.jobs) { job in
+                ForEach(dayGroups, id: \.title) { group in
+                Section(group.title) {
+                ForEach(group.jobs) { job in
                     JobRow(job: job).tag(job.id)
                         .contextMenu {
                             if job.status == .failed || job.status == .done {
@@ -48,40 +50,42 @@ struct MainWindow: View {
                             Button("목록에서 삭제", role: .destructive) { store.remove(job.id) }
                         }
                 }
-            }
-            .overlay {
-                if store.jobs.isEmpty {
-                    Text("녹음하거나\n오디오 파일을 여기로 끌어다 놓으세요")
-                        .multilineTextAlignment(.center).foregroundStyle(.secondary)
+                }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+            .listStyle(.sidebar)
+            .overlay {
+                if store.jobs.isEmpty {
+                    Text("녹음이 없습니다").foregroundStyle(.tertiary)
+                }
+            }
+            .safeAreaInset(edge: .bottom) { sidebarFooter }
+            .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 360)
         } detail: {
             if let job = store.jobs.first(where: { $0.id == store.selectedID }) {
                 JobDetail(job: job)
             } else {
-                Text("항목을 선택하세요").foregroundStyle(.secondary)
+                EmptyDetail()
             }
         }
         .toolbar {
-            ToolbarItemGroup {
-                Picker("프로필", selection: $store.selectedProfile) {
-                    Text("자동(프로필 없음)").tag("")
-                    ForEach(store.profiles, id: \.self) { Text($0).tag($0) }
-                }
-                .disabled(store.isRecording)
-                Picker("모드", selection: $store.recordMode) {
-                    Text("녹음 후 처리").tag("post")
-                    Text("실시간 (2단계 예정)").tag("live").disabled(true)
-                }
-                .disabled(store.isRecording)
-                Button {
-                    store.toggleRecording()
+            ToolbarItemGroup(placement: .navigation) {
+                Menu {
+                    Picker("과목 프로필", selection: $store.selectedProfile) {
+                        Text("자동(프로필 없음)").tag("")
+                        ForEach(store.profiles, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.inline)
                 } label: {
-                    Label(store.isRecording ? "정지 \(formatTime(store.elapsed))" : "녹음",
-                          systemImage: store.isRecording ? "stop.circle.fill" : "record.circle")
-                        .foregroundStyle(store.isRecording ? .red : .primary)
+                    Label(store.selectedProfile.isEmpty ? "프로필 없음" : store.selectedProfile, systemImage: "graduationcap")
+                        .labelStyle(.titleAndIcon)
                 }
+                .disabled(store.isRecording)
+                .help("다음 녹음에 쓸 과목 프로필(용어 힌트·위키 폴더)")
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                // 모드 선택(실시간/녹음 후 처리)은 2단계 실시간 받아쓰기와 함께 다시 넣는다.
+                RecordButton()
                 if let job = store.jobs.first(where: { $0.id == store.selectedID }) {
                     Button { ui.showMaterials.toggle() } label: {
                         Label("강의자료 \(ChatHub.shared.session(for: job.id).materials.count)", systemImage: "books.vertical")
@@ -91,7 +95,6 @@ struct MainWindow: View {
                     }
                     .help("채팅에 붙일 강의자료 (기본: 자동 선택)")
                 }
-                BatteryBadge()
                 Button { layout.showChat.toggle() } label: {
                     Label("채팅", systemImage: layout.showChat ? "sidebar.trailing" : "bubble.left.and.bubble.right")
                 }
@@ -116,33 +119,108 @@ struct MainWindow: View {
     }
 }
 
+private struct DayGroup { let title: String; let jobs: [Job] }
+
+extension MainWindow {
+    fileprivate var dayGroups: [DayGroup] {
+        let cal = Calendar.current
+        var order: [Date] = []
+        var map: [Date: [Job]] = [:]
+        for j in store.jobs {
+            let d = cal.startOfDay(for: j.createdAt)
+            if map[d] == nil { order.append(d) }
+            map[d, default: []].append(j)
+        }
+        return order.map { d in
+            let title: String
+            if cal.isDateInToday(d) { title = "오늘" }
+            else if cal.isDateInYesterday(d) { title = "어제" }
+            else { title = d.formatted(.dateTime.month().day().weekday(.abbreviated)) }
+            return DayGroup(title: title, jobs: map[d] ?? [])
+        }
+    }
+
+    fileprivate var sidebarFooter: some View {
+        let processing = store.jobs.first { $0.status == .processing }
+        let queued = store.jobs.filter { $0.status == .queued }.count
+        return VStack(alignment: .leading, spacing: 6) {
+            if let p = processing {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("\(p.stage ?? "처리 중")").lineLimit(1)
+                    if queued > 0 { Text("· 대기 \(queued)").foregroundStyle(.secondary) }
+                }
+                .font(.caption)
+            }
+            HStack {
+                Button { pickAudioFiles(into: store) } label: { Label("파일 가져오기", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.borderless)
+                Spacer()
+                BatteryBadge()
+            }
+            .font(.callout)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(.bar)
+    }
+}
+
+/// 아무것도 고르지 않았을 때: 녹음 시작 안내
+struct EmptyDetail: View {
+    @EnvironmentObject var store: Store
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "waveform")
+                .font(.system(size: 54, weight: .light))
+                .foregroundStyle(LinearGradient(colors: [Theme.record, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+            VStack(spacing: 6) {
+                Text("수업을 녹음해 보세요").font(.title2.weight(.semibold))
+                Text("녹음이 끝나면 화자별 대본이 자동으로 만들어집니다.\n오디오 파일을 이 창에 끌어다 놓아도 됩니다.")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            }
+            RecordButton(large: true)
+            HStack(spacing: 14) {
+                Label(store.selectedProfile.isEmpty ? "프로필 없음" : store.selectedProfile, systemImage: "graduationcap")
+                Label("⌥⌘R", systemImage: "keyboard")
+            }
+            .font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.paneBackground)
+    }
+}
+
 struct JobRow: View {
     @EnvironmentObject var store: Store
     @ObservedObject var power = PowerMonitor.shared
     let job: Job
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(job.title).lineLimit(1).font(.body)
-            HStack(spacing: 6) {
-                Text(job.createdAt.formatted(date: .abbreviated, time: .shortened))
-                if let d = job.duration { Text("· " + formatTime(d)) }
-                Spacer()
-                badge
+        HStack(spacing: 10) {
+            StatusIcon(status: job.status)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(job.title).lineLimit(1).font(.body.weight(.medium))
+                HStack(spacing: 4) {
+                    Text(job.createdAt.formatted(date: .omitted, time: .shortened))
+                    if let d = job.duration { Text("· " + formatTime(d)) }
+                    if !job.profile.isEmpty { Text("· " + job.profile).lineLimit(1) }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                if let note = statusNote {
+                    Text(note).font(.caption2).foregroundStyle(job.status == .failed ? .orange : .secondary).lineLimit(1)
+                }
             }
-            .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
-    @ViewBuilder private var badge: some View {
+    private var statusNote: String? {
         switch job.status {
-        case .processing:
-            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text(job.stage ?? "처리 중") }
-        case .done: Label("완료", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .failed: Label("실패", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-        case .recording: Label("녹음 중", systemImage: "record.circle.fill").foregroundStyle(.red)
-        case .queued:
-            if store.chargingOnly && !power.onAC { Label("충전 대기", systemImage: "bolt.slash") } else { Label("대기", systemImage: "clock") }
+        case .processing: return job.stage ?? "처리 중"
+        case .failed: return "처리 실패 · 우클릭해서 다시 처리"
+        case .recording: return "녹음 중"
+        case .queued: return store.chargingOnly && !power.onAC ? "충전 연결 대기" : "대기 중"
+        case .done: return nil
         }
     }
 }
@@ -155,8 +233,6 @@ struct TranscriptView: View {
     @ObservedObject var power = PowerMonitor.shared
     let job: Job
     @StateObject private var st = TranscriptState()
-
-    private static let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .brown, .indigo]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -197,63 +273,79 @@ struct TranscriptView: View {
     private var isLoadedHere: Bool { player.loadedPath == job.audioPath }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(job.title).font(.title2.bold()).lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(job.title).font(.title2.weight(.semibold)).lineLimit(1)
                 Spacer()
                 if job.status == .done, let p = job.transcriptPath {
-                    Button("복사") {
-                        if let s = try? String(contentsOfFile: p, encoding: .utf8) {
-                            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s, forType: .string)
+                    Button { store.sendToWiki(job.id, manual: true) } label: { Label("위키로 보내기", systemImage: "books.vertical") }
+                        .controlSize(.small)
+                    Menu {
+                        Button("대본 복사") {
+                            if let s = try? String(contentsOfFile: p, encoding: .utf8) {
+                                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s, forType: .string)
+                            }
                         }
-                    }
-                    Button("Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
-                    Button("위키로 보내기") { store.sendToWiki(job.id, manual: true) }
-                    if store.exportEnabled && !store.exportFolder.isEmpty {
-                        Button("내보내기") { store.export(path: p) }
-                    }
+                        Button("Finder에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
+                        if store.exportEnabled && !store.exportFolder.isEmpty {
+                            Button("내보내기 폴더로 복사") { store.export(path: p) }
+                        }
+                        if let w = job.wikiPath {
+                            Button("위키 사본 Finder에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: w)]) }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 }
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                ForEach(metaChips, id: \.0) { Chip(text: $0.0, systemImage: $0.1) }
+                if job.wikiPath != nil { Chip(text: "위키에 있음", systemImage: "checkmark", tint: .green) }
+            }
+            HStack(spacing: 10) {
                 Button {
                     if isLoadedHere && player.isPlaying { player.pause() } else { player.play(path: job.audioPath) }
-                } label: { Image(systemName: isLoadedHere && player.isPlaying ? "pause.fill" : "play.fill") }
+                } label: {
+                    Image(systemName: isLoadedHere && player.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 28, height: 28).background(Color.accentColor, in: Circle())
+                }
+                .buttonStyle(.plain)
                 if isLoadedHere {
-                    Text("\(formatTime(player.currentTime)) / \(formatTime(player.duration))").monospacedDigit().foregroundStyle(.secondary)
+                    ProgressView(value: min(player.currentTime, max(player.duration, 0.01)), total: max(player.duration, 0.01))
+                        .frame(maxWidth: 220)
+                    Text("\(formatTime(player.currentTime)) / \(formatTime(player.duration))").monospacedDigit()
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("재생").font(.caption).foregroundStyle(.secondary)
                 }
                 if let e = player.error { Text(e).foregroundStyle(.red).font(.caption) }
                 Spacer()
-                Text(metaLine).font(.caption).foregroundStyle(.secondary)
-            }
-            if let w = job.wikiPath {
-                HStack(spacing: 6) {
-                    Image(systemName: "books.vertical")
-                    Text("위키: \((w as NSString).lastPathComponent)").lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                    Button("Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: w)]) }.controlSize(.small)
-                }
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            if job.status == .done, let t = st.transcript, !t.speakers.isEmpty {
-                HStack {
-                    Text("화자").font(.caption).foregroundStyle(.secondary)
+                if job.status == .done, let t = st.transcript, !t.speakers.isEmpty {
                     ForEach(Array(t.speakers.enumerated()), id: \.element) { i, s in
-                        Button(s) { openRename(s) }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            .tint(Self.palette[i % Self.palette.count])
+                        Button { openRename(s) } label: {
+                            HStack(spacing: 4) {
+                                Circle().fill(Theme.speakerColor(i)).frame(width: 7, height: 7)
+                                Text(s)
+                            }
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Theme.speakerColor(i).opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help("눌러서 이름 바꾸기")
                     }
-                    Text("(누르면 이름 변경)").font(.caption2).foregroundStyle(.tertiary)
                 }
             }
         }
-        .padding(12)
+        .padding(.horizontal, 20).padding(.vertical, 14)
     }
 
-    private var metaLine: String {
-        var parts = ["프로필: \(job.profile.isEmpty ? "자동" : job.profile)"]
-        if let d = st.transcript?.meta["duration"] { parts.append("길이 \(d)") }
-        if let w = job.avgWatts { parts.append(String(format: "평균 %.1fW", w)) }
-        if let u = job.batteryUsedPct, job.avgWatts != nil { parts.append(String(format: "배터리 -%.1f%%p", u)) }
-        return parts.joined(separator: " · ")
+    private var metaChips: [(String, String)] {
+        var parts = [(job.profile.isEmpty ? "프로필 없음" : job.profile, "graduationcap")]
+        if let d = st.transcript?.meta["duration"] { parts.append((d, "clock")) }
+        if let w = job.avgWatts { parts.append((String(format: "평균 %.1fW", w), "bolt")) }
+        if let u = job.batteryUsedPct, job.avgWatts != nil { parts.append((String(format: "배터리 -%.1f%%p", u), "battery.50")) }
+        return parts
     }
 
     @ViewBuilder private var content: some View {
@@ -283,22 +375,35 @@ struct TranscriptView: View {
                 let speakers = t.speakers
                 ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(t.segments) { seg in
                             let idx = speakers.firstIndex(of: seg.speaker) ?? 0
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Button(seg.timeLabel) { player.play(path: job.audioPath, from: seg.time) }
-                                    .buttonStyle(.link).monospacedDigit().frame(width: 56, alignment: .trailing)
-                                Text(seg.speaker).bold().foregroundStyle(Self.palette[idx % Self.palette.count])
-                                    .frame(width: 70, alignment: .leading)
-                                    .onTapGesture { openRename(seg.speaker) }
-                                Text(seg.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            let first = seg.id == 0 || t.segments[seg.id - 1].speaker != seg.speaker
+                            VStack(alignment: .leading, spacing: 3) {
+                                if first {
+                                    HStack(spacing: 6) {
+                                        Circle().fill(Theme.speakerColor(idx)).frame(width: 8, height: 8)
+                                        Text(seg.speaker).font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(Theme.speakerColor(idx))
+                                            .onTapGesture { openRename(seg.speaker) }
+                                    }
+                                    .padding(.top, seg.id == 0 ? 0 : 12)
+                                }
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Button(seg.timeLabel) { player.play(path: job.audioPath, from: seg.time) }
+                                        .buttonStyle(.plain).font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+                                        .help("여기부터 재생")
+                                    Text(seg.text).font(.body).lineSpacing(4).textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.vertical, 5).padding(.horizontal, 6)
+                                .background(isActive(seg, t) ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
                             }
-                            .padding(6)
-                            .background(isActive(seg, t) ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .id(seg.id)
                         }
                     }
-                    .padding(12)
+                    .padding(.horizontal, 20).padding(.vertical, 14)
                 }
                 .onChange(of: t.segments.count) { _ in
                     if st.live, let last = t.segments.last { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -329,10 +434,11 @@ struct JobDetail: View {
     var body: some View {
         HSplitView {
             VSplitView {
-                TranscriptView(job: job).frame(minHeight: 180)
-                NoteView(job: job).frame(minHeight: 130)
+                TranscriptView(job: job).frame(minHeight: 200)
+                    .background(Theme.paneBackground)
+                NoteView(job: job).frame(minHeight: 140)
             }
-            .frame(minWidth: 400)
+            .frame(minWidth: 440)
             if layout.showChat {
                 ChatView(job: job, session: ChatHub.shared.session(for: job.id))
                     .frame(minWidth: 290, idealWidth: 360, maxWidth: 560)
