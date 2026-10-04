@@ -241,6 +241,7 @@ struct TopPane: View {
                 .frame(maxWidth: 220)
                 .background(on ? Color.accentColor.opacity(0.15) : .clear, in: Capsule())
                 .foregroundStyle(on ? Color.accentColor : Color.primary)
+                .contentShape(Capsule())   // 글자 밖 빈 곳을 눌러도 탭이 바뀌게
         }
         .buttonStyle(.plain)
     }
