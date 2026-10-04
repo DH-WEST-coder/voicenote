@@ -31,16 +31,6 @@ enum Courses {
             .map(\.lastPathComponent).sorted()
     }
 
-    /// 프로필 → 과목 폴더 이름. 프로필의 wiki_dir(…/<과목>/transcript)의 부모 폴더 이름을 우선 쓴다.
-    static func course(forProfile p: String) -> String? {
-        guard !p.isEmpty else { return nil }
-        if let t = Profiles.wikiTarget(for: p) {
-            let parent = ((t.dir as NSString).deletingLastPathComponent as NSString).lastPathComponent
-            if !parent.isEmpty { return parent }
-        }
-        return Profiles.course(for: p)
-    }
-
     static func lectureDir(_ course: String) -> URL {
         semesterDir.appendingPathComponent(course).appendingPathComponent("lecture")
     }
@@ -145,10 +135,8 @@ final class MaterialImporter: ObservableObject {
 
     func defaultCourse() -> String? {
         let s = Store.shared
-        let profile = targetSession?.profile ?? s.selectedProfile
-        let c = Courses.course(forProfile: profile) ?? Courses.course(forProfile: s.selectedProfile)
-        if let c, Courses.list().contains(c) { return c }
-        return c
+        if let t = targetSession, let c = s.course(of: t) { return c }
+        return s.project(s.defaultProjectID())?.course
     }
 
     func confirm(_ p: PendingImport) {
@@ -171,12 +159,12 @@ final class MaterialImporter: ObservableObject {
         let s = Store.shared
         var lines = ["\(r.attachments.count)개 자료를 위키 \(course)/lecture 로 옮겼습니다."]
         if !r.attachments.isEmpty {
-            // 노트가 없으면 새로 만든다(프로필은 과목에 맞는 것이 있으면 그것).
+            // 노트가 없으면 새로 만든다(그 과목의 프로젝트가 있으면 거기에).
             let sid: UUID
             if let id = sessionID, s.session(id) != nil { sid = id }
             else {
-                let profile = s.profiles.first { Courses.course(forProfile: $0) == course } ?? s.selectedProfile
-                sid = s.newSession(profile: profile).id
+                let proj = s.projects.first { $0.course == course }?.id ?? s.defaultProjectID()
+                sid = s.newSession(projectID: proj).id
                 lines.append("새 노트를 만들어 연결했습니다.")
             }
             let firstTime = s.session(sid)?.attachments.isEmpty ?? true

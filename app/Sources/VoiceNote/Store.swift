@@ -14,9 +14,14 @@ final class Store: ObservableObject {
     /// 노트(수업 1회)와 프로젝트
     @Published var sessions: [Session] = []
     @Published var projects: [Project] = []
-    @Published var selectedSessionID: UUID? { didSet { UserDefaults.standard.set(selectedSessionID?.uuidString, forKey: "selectedSession") } }
-    @Published var profiles: [String] = []
-    @Published var selectedProfile: String { didSet { UserDefaults.standard.set(selectedProfile, forKey: "profile") } }
+    @Published var selectedSessionID: UUID? {
+        didSet {
+            UserDefaults.standard.set(selectedSessionID?.uuidString, forKey: "selectedSession")
+            if let p = selectedSession?.projectID { lastProjectID = p }
+        }
+    }
+    /// 다음 새 노트·녹음이 들어갈 프로젝트(선택한 노트의 프로젝트를 따라가고, 도구막대 메뉴에서 바꿀 수 있다)
+    @Published var lastProjectID: UUID? { didSet { UserDefaults.standard.set(lastProjectID?.uuidString, forKey: "lastProject") } }
     @Published var enginePath: String { didSet { UserDefaults.standard.set(enginePath, forKey: "enginePath") } }
     @Published var exportEnabled: Bool { didSet { UserDefaults.standard.set(exportEnabled, forKey: "exportEnabled") } }
     @Published var exportFolder: String { didSet { UserDefaults.standard.set(exportFolder, forKey: "exportFolder") } }
@@ -51,12 +56,10 @@ final class Store: ObservableObject {
         enginePath = value("--engine") ?? d.string(forKey: "enginePath") ?? "/Users/DH_WEST/LocalAI_Project/voice"
         exportEnabled = value("--export-dir") != nil ? true : d.bool(forKey: "exportEnabled")
         exportFolder = value("--export-dir") ?? d.string(forKey: "exportFolder") ?? ""
-        selectedProfile = value("--profile") ?? d.string(forKey: "profile") ?? "전력전자"
+        lastProjectID = d.string(forKey: "lastProject").flatMap(UUID.init(uuidString:))
         chargingOnly = d.bool(forKey: "chargingOnly")
 
         try? FileManager.default.createDirectory(at: Paths.support, withIntermediateDirectories: true)
-        Profiles.ensureDefaults()
-        reloadProfiles()
         loadState()
         loadSessions()
         selectedSessionID = d.string(forKey: "selectedSession").flatMap(UUID.init(uuidString:)).flatMap { id in sessions.first { $0.id == id }?.id }
@@ -106,14 +109,19 @@ final class Store: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                for f in files { self.enqueue(URL(fileURLWithPath: f)) }
+                // 디버그: --debug-new-in <프로젝트 이름>  그 프로젝트의 '+' 버튼처럼 새 노트를 만들고 --enqueue 파일을 거기에 넣는다.
+                var newNote: UUID?
+                if let pn = value("--debug-new-in"), let p = self.projects.first(where: { $0.name == pn }) {
+                    newNote = self.newSession(projectID: p.id).id
+                }
+                for f in files { self.enqueue(URL(fileURLWithPath: f), into: newNote) }
                 if let t = seedT, let a = seedA {
                     let ts = t.split(separator: ",").map(String.init), au = a.split(separator: ",").map(String.init)
                     var ids: [UUID] = []
                     for (i, tp) in ts.enumerated() {
                         let ap = au[min(i, au.count - 1)]
                         var job = Job(audioPath: ap, title: "시험 " + ((tp as NSString).lastPathComponent), createdAt: Date().addingTimeInterval(Double(i)),
-                                      duration: (try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: ap)))?.duration, profile: self.selectedProfile)
+                                      duration: (try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: ap)))?.duration, profile: "")
                         job.status = .done; job.transcriptPath = tp
                         self.jobs.insert(job, at: 0); ids.append(job.id)
                     }
@@ -198,11 +206,6 @@ final class Store: ObservableObject {
         f(&jobs[i]); saveState()
     }
 
-    func reloadProfiles() {
-        profiles = Profiles.names()
-        if !selectedProfile.isEmpty, !profiles.contains(selectedProfile) { selectedProfile = "" }
-    }
-
     // MARK: - 녹음
 
     func toggleRecording() { isRecording ? stopRecording() : startRecording() }
@@ -259,15 +262,14 @@ final class Store: ObservableObject {
             isRecording = true; elapsed = 0; message = nil
             // 녹음 중에도 노트를 쓸 수 있도록 작업을 바로 만든다(status=recording).
             let target = session(_recordTarget) ?? newSession()
-            var job = Job(audioPath: url.path, title: "녹음 " + titleDate(Date()), createdAt: Date(), duration: nil, profile: target.profile)
+            var job = Job(audioPath: url.path, title: "녹음 " + titleDate(Date()), createdAt: Date(), duration: nil, profile: "")
             job.status = .recording
             jobs.insert(job, at: 0); recordingJobID = job.id; saveState()
             updateSession(target.id) { $0.recordingIDs.append(job.id) }
             selectedSessionID = target.id
             trackPower(job.id)
             if LiveSettings.shared.enabled {
-                LiveTranscriber.shared.start(jobID: job.id, profile: target.profile, terms: target.terms,
-                                             sessionID: target.id, inputFile: Store.liveInputFile)
+                LiveTranscriber.shared.start(jobID: job.id, args: engineArgs(for: target, course: false), inputFile: Store.liveInputFile)
             }
             recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
                 MainActor.assumeIsolated {
@@ -316,12 +318,12 @@ final class Store: ObservableObject {
         let dur = (try? AVAudioPlayer(contentsOf: url))?.duration
         let name = title ?? url.deletingPathExtension().lastPathComponent
         let target = session(sessionID) ?? newSession(title: name)
-        let job = Job(audioPath: url.path, title: name, createdAt: Date(), duration: dur, profile: target.profile)
+        let job = Job(audioPath: url.path, title: name, createdAt: Date(), duration: dur, profile: "")
         jobs.insert(job, at: 0)
         updateSession(target.id) { $0.recordingIDs.append(job.id) }
         selectedSessionID = target.id
         saveState()
-        log("enqueue \(url.path) profile=\(selectedProfile)")
+        log("enqueue \(url.path) project=\(project(of: target)?.name ?? "-")")
         pump()
     }
 
@@ -368,14 +370,7 @@ final class Store: ObservableObject {
         p.executableURL = URL(fileURLWithPath: py)
         var pargs = [script, "transcribe", job.audioPath]
         let sess = session(ofJob: job.id)
-        let profile = sess?.profile ?? job.profile
-        if !profile.isEmpty { pargs += ["--profile", profile] }   // 비어 있으면 '자동(프로필 없음)'
-        if let sess, !sess.terms.isEmpty {
-            let tf = Paths.support.appendingPathComponent("terms/\(sess.id.uuidString).txt")
-            try? FileManager.default.createDirectory(at: tf.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? sess.terms.joined(separator: "\n").write(to: tf, atomically: true, encoding: .utf8)
-            pargs += ["--terms-file", tf.path]
-        }
+        pargs += engineArgs(for: sess)   // 프로젝트의 언어·용어·과목
         pargs += ["--json-progress", "--out", Paths.transcripts.path]
         p.arguments = pargs
         p.currentDirectoryURL = URL(fileURLWithPath: engine)

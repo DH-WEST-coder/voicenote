@@ -58,11 +58,10 @@ struct MenuContent: View {
 
         Button("새 노트") { store.newSession(); show("main") }
 
-        Picker("프로필", selection: $store.selectedProfile) {
-            Text("자동(프로필 없음)").tag("")
-            ForEach(store.profiles, id: \.self) { Text($0).tag($0) }
+        Picker("프로젝트", selection: $store.lastProjectID) {
+            Text("프로젝트 없음").tag(UUID?.none)
+            ForEach(store.projects) { Text($0.name).tag(UUID?.some($0.id)) }
         }
-        .disabled(store.isRecording)
 
         if let m = store.message { Text(m) }
 

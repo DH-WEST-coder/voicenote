@@ -70,58 +70,24 @@ enum Paths {
     static var promptsFile: URL { support.appendingPathComponent("chat_prompts.json") }
 }
 
-struct WikiTarget { let course: String; let dir: String }
-
+/// 옛 profiles.json(프로필 = 과목 설정). 앱은 이제 쓰지 않고, 프로젝트로 한 번 옮길 때만 읽는다.
 enum Profiles {
-    static let defaultTerms = "전력전자 PWM 듀티 듀티비 캐리어 삼각파 스위칭 주파수 인덕터 리플 RL 부하 역기전력 전향 보상 PI 제어기 적분기 안티 와인드업 연속 제어 이산 제어 샘플링 피크 밸리 Simulink PLECS 서브시스템 트리거 레그 암 단락 데드타임"
-        .split(separator: " ").map(String.init)
+    struct Legacy { let name: String; let language: String; let terms: [String]; let course: String? }
 
-    /// 기본 프로필의 wiki_dir은 vault 기준 상대경로(semester/과목/transcript).
-    static func wiki(_ course: String) -> [String: Any] {
-        ["course": course, "wiki_dir": "\(VaultConfig.shared.semester)/\(course)/transcript"]
-    }
-
-    static func ensureDefaults() {
-        let fm = FileManager.default
-        guard !fm.fileExists(atPath: Paths.profilesFile.path) else { return }
-        try? fm.createDirectory(at: Paths.support, withIntermediateDirectories: true)
-        let obj: [String: Any] = [
-            "전력전자": ["language": "Korean", "terms": defaultTerms].merging(wiki("전력전자")) { a, _ in a },
-            "Power Electronics (EN)": ["language": "English",
-                "terms": ["freewheeling diode", "rectifier", "Fourier series", "harmonics", "ripple"]]
-                .merging(wiki("전력전자")) { a, _ in a },
-            "물리전자": ["language": "Korean", "terms": [String]()].merging(wiki("물리전자")) { a, _ in a },
-            "인턴십 PESL": ["language": "Korean", "terms": defaultTerms].merging(wiki("인턴십")) { a, _ in a },
-        ]
-        if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) {
-            try? d.write(to: Paths.profilesFile)
-        }
-    }
-
-    private static func load() -> [String: Any] {
+    static func legacy() -> [Legacy] {
         guard let d = try? Data(contentsOf: Paths.profilesFile),
-              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [:] }
-        return obj
-    }
-
-    static func names() -> [String] { load().keys.sorted() }
-
-    static func course(for name: String) -> String? {
-        let key = name.precomposedStringWithCanonicalMapping
-        for (k, v) in load() where k.precomposedStringWithCanonicalMapping == key {
-            return (v as? [String: Any])?["course"] as? String
+              let all = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [] }
+        return all.keys.sorted().map { k in
+            let o = all[k] as? [String: Any] ?? [:]
+            // 과목은 wiki_dir(…/<과목>/transcript)의 부모 폴더 이름을 우선 쓴다.
+            var course = o["course"] as? String
+            if let w = o["wiki_dir"] as? String, !w.isEmpty {
+                let parent = ((w as NSString).deletingLastPathComponent as NSString).lastPathComponent
+                if !parent.isEmpty { course = parent }
+            }
+            return Legacy(name: k, language: o["language"] as? String ?? "",
+                          terms: (o["terms"] as? [String] ?? []).filter { !$0.isEmpty },
+                          course: (course?.isEmpty ?? true) ? nil : course)
         }
-        return nil
-    }
-
-    /// 프로필에 course와 wiki_dir이 둘 다 있으면 위키 대상으로 돌려준다(폴더 존재 여부는 호출 쪽에서 확인).
-    static func wikiTarget(for name: String) -> WikiTarget? {
-        let key = name.precomposedStringWithCanonicalMapping
-        for (k, v) in load() where k.precomposedStringWithCanonicalMapping == key {
-            guard let o = v as? [String: Any], let c = o["course"] as? String, let d = o["wiki_dir"] as? String,
-                  !c.isEmpty, !d.isEmpty else { return nil }
-            return WikiTarget(course: c, dir: VaultConfig.resolve(d, vault: VaultConfig.shared.vault))
-        }
-        return nil
     }
 }

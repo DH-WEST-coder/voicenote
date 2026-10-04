@@ -5,10 +5,9 @@ import UniformTypeIdentifiers
 
 /// 이름 바꾸기·새로 만들기 창이 하는 일
 enum RenameTask: Identifiable {
-    case newProject, project(UUID), session(UUID)
+    case project(UUID), session(UUID)
     var id: String {
         switch self {
-        case .newProject: return "new-project"
         case .project(let i): return "p-\(i)"
         case .session(let i): return "s-\(i)"
         }
@@ -41,10 +40,15 @@ final class LayoutState: ObservableObject {
 /// 왼쪽 목록에서 접은 프로젝트(기억). 프로젝트 없음은 "none".
 final class SidebarState: ObservableObject {
     static let shared = SidebarState()
+    /// 노트를 끌어다 놓을 곳으로 강조 중인 섹션 key
+    @Published var dropKey: String?
     @Published var collapsed: Set<String> {
         didSet { UserDefaults.standard.set(Array(collapsed), forKey: "collapsedProjects") }
     }
     init() { collapsed = Set(UserDefaults.standard.stringArray(forKey: "collapsedProjects") ?? []) }
+    func setDrop(_ key: String, _ on: Bool) {
+        if on { dropKey = key } else if dropKey == key { dropKey = nil }
+    }
     func binding(_ key: String) -> Binding<Bool> {
         Binding(get: { !self.collapsed.contains(key) },
                 set: { if $0 { self.collapsed.remove(key) } else { self.collapsed.insert(key) } })
@@ -57,7 +61,7 @@ struct MainWindow: View {
     @ObservedObject private var layout = LayoutState.shared
     @ObservedObject private var sidebar = SidebarState.shared
     @ObservedObject fileprivate var importer = MaterialImporter.shared
-    @ObservedObject private var profileEditor = ProfileEditorState.shared
+    @ObservedObject private var projectEditor = ProjectEditorState.shared
     @ObservedObject private var liveSettings = LiveSettings.shared
 
     var body: some View {
@@ -86,13 +90,12 @@ struct MainWindow: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Menu {
-                    ProfileMenuItems(current: store.selectedProfile) { store.selectedProfile = $0 }
+                    ProjectMenuItems(current: store.defaultProjectID()) { store.lastProjectID = $0 }
                 } label: {
-                    Label(store.selectedProfile.isEmpty ? "프로필 없음" : store.selectedProfile, systemImage: "graduationcap")
+                    Label(store.project(store.defaultProjectID())?.name ?? "프로젝트 없음", systemImage: "folder")
                         .labelStyle(.titleAndIcon)
                 }
-                .disabled(store.isRecording)
-                .help("다음 새 노트에 쓸 과목 프로필(용어 힌트·위키 폴더)")
+                .help("다음 새 노트·녹음이 들어갈 프로젝트(그 프로젝트의 과목 설정으로 받아쓰고 위키로 보냅니다)")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { liveSettings.enabled.toggle() } label: {
@@ -122,7 +125,7 @@ struct MainWindow: View {
             return !ok.isEmpty
         } isTargeted: { ui.dropTargeted = $0 }
         .sheet(isPresented: $importer.showPicker) { DownloadsPicker() }
-        .sheet(item: $profileEditor.editing) { e in ProfileEditor(editing: e).environmentObject(store) }
+        .sheet(item: $projectEditor.editing) { e in ProjectEditor(editing: e).environmentObject(store) }
         .sheet(item: $importer.pending) { p in MaterialImportSheet(pending: p).environmentObject(store) }
         .sheet(item: $ui.rename) { t in RenameSheet(task: t, ui: ui).environmentObject(store) }
         .overlay {
@@ -146,30 +149,46 @@ struct MainWindow: View {
 // MARK: - 왼쪽 목록
 
 extension MainWindow {
-    /// 프로젝트 하나의 섹션(접기 가능). project가 nil이면 "프로젝트 없음".
+    /// 프로젝트 하나의 섹션(접기 가능). project가 nil이면 "프로젝트 없음". 섹션 어디에 놓아도 그 프로젝트로 옮겨진다.
     @ViewBuilder fileprivate func projectSection(key: String, project: Project?) -> some View {
         let notes = store.sessions.filter { $0.projectID == project?.id }.sorted { $0.createdAt > $1.createdAt }
+        let hot = sidebar.dropKey == key
         Section(isExpanded: sidebar.binding(key)) {
             ForEach(notes) { s in
                 NoteRow(session: s)
                     .tag(s.id)
                     .draggable(s.id.uuidString)
                     .contextMenu { noteMenu(s) }
+                    .listRowBackground(hot ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .dropDestination(for: String.self) { items, _ in dropNotes(items, to: project) }
+                        isTargeted: { sidebar.setDrop(key, $0) }
+            }
+            if notes.isEmpty {
+                Text("노트를 끌어다 놓으세요").font(.caption).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .listRowBackground(hot ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .dropDestination(for: String.self) { items, _ in dropNotes(items, to: project) }
+                        isTargeted: { sidebar.setDrop(key, $0) }
             }
         } header: {
             HStack(spacing: 6) {
-                Image(systemName: project == nil ? "tray" : "folder")
+                Image(systemName: project == nil ? "tray" : (project?.course == nil ? "folder" : "books.vertical"))
+                    .help(project?.course.map { "위키 과목: \($0)" } ?? "위키 과목 없음")
                 Text(project?.name ?? "프로젝트 없음")
                 Text("\(notes.count)").foregroundStyle(.tertiary)
+                Spacer()
+                Button { store.newSession(projectID: project?.id) } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderless).help(project == nil ? "새 노트" : "이 프로젝트에 새 노트")
             }
+            .padding(.vertical, 2)
+            .background(hot ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
-            .dropDestination(for: String.self) { items, _ in
-                var moved = false
-                for i in items { if let id = UUID(uuidString: i), store.session(id) != nil { store.move(session: id, to: project?.id); moved = true } }
-                return moved
-            }
+            .dropDestination(for: String.self) { items, _ in dropNotes(items, to: project) }
+                isTargeted: { sidebar.setDrop(key, $0) }
             .contextMenu {
                 if let p = project {
+                    Button("프로젝트 설정…") { ProjectEditorState.shared.edit(p.id) }
                     Button("이름 바꾸기…") { ui.renameText = p.name; ui.rename = .project(p.id) }
                     Button("프로젝트 삭제…", role: .destructive) {
                         ui.confirm = ConfirmTask(title: "'\(p.name)' 프로젝트를 지울까요?",
@@ -180,6 +199,15 @@ extension MainWindow {
                 }
             }
         }
+    }
+
+    fileprivate func dropNotes(_ items: [String], to project: Project?) -> Bool {
+        var moved = false
+        for i in items {
+            if let id = UUID(uuidString: i), store.session(id) != nil { store.move(session: id, to: project?.id); moved = true }
+        }
+        sidebar.dropKey = nil
+        return moved
     }
 
     @ViewBuilder fileprivate func noteMenu(_ s: Session) -> some View {
@@ -222,7 +250,7 @@ extension MainWindow {
             HStack {
                 Button { store.newSession() } label: { Label("새 노트", systemImage: "square.and.pencil") }
                     .buttonStyle(.borderless)
-                Button { ui.renameText = ""; ui.rename = .newProject } label: { Label("새 프로젝트", systemImage: "folder.badge.plus") }
+                Button { ProjectEditorState.shared.new() } label: { Label("새 프로젝트", systemImage: "folder.badge.plus") }
                     .buttonStyle(.borderless)
                 Spacer()
             }
@@ -247,7 +275,6 @@ struct RenameSheet: View {
 
     private var heading: String {
         switch task {
-        case .newProject: return "새 프로젝트"
         case .project: return "프로젝트 이름 바꾸기"
         case .session: return "노트 이름 바꾸기"
         }
@@ -256,11 +283,11 @@ struct RenameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(heading).font(.headline)
-            TextField(task.id == "new-project" ? "프로젝트 이름 (예: 전력전자)" : "이름", text: $ui.renameText).onSubmit { apply() }
+            TextField("이름", text: $ui.renameText).onSubmit { apply() }
             HStack {
                 Spacer()
                 Button("취소") { ui.rename = nil }.keyboardShortcut(.cancelAction)
-                Button(task.id == "new-project" ? "만들기" : "변경") { apply() }
+                Button("변경") { apply() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(ui.renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -272,10 +299,6 @@ struct RenameSheet: View {
         let t = ui.renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         switch task {
-        case .newProject:
-            let p = store.newProject(t)
-            // 선택한 노트가 프로젝트 없음이면 새 프로젝트로 옮기지는 않는다(끌어다 놓거나 우클릭으로 이동).
-            _ = p
         case .project(let id): store.renameProject(id, t)
         case .session(let id): store.renameSession(id, t)
         }
@@ -314,7 +337,7 @@ struct EmptyDetail: View {
                 .buttonStyle(.plain)
             }
             HStack(spacing: 14) {
-                Label(store.selectedProfile.isEmpty ? "프로필 없음" : store.selectedProfile, systemImage: "graduationcap")
+                Label(store.project(store.defaultProjectID())?.name ?? "프로젝트 없음", systemImage: "folder")
                 Label("⌥⌘R", systemImage: "keyboard")
             }
             .font(.caption).foregroundStyle(.tertiary)
@@ -425,22 +448,34 @@ struct NoteHeader: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                let proj = store.project(of: session)
                 Menu {
-                    ProfileMenuItems(current: session.profile) { p in store.updateSession(session.id) { $0.profile = p } }
+                    ProjectMenuItems(current: session.projectID) { store.move(session: session.id, to: $0) }
                 } label: {
-                    Chip(text: session.profile.isEmpty ? "프로필 없음" : session.profile, systemImage: "graduationcap",
-                         tint: session.profile.isEmpty ? .orange : .secondary)
+                    Chip(text: proj?.name ?? "프로젝트 없음", systemImage: proj?.course == nil ? "folder" : "books.vertical",
+                         tint: proj == nil ? .orange : .secondary)
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("이 노트의 과목 프로필 (받아쓰기 용어·위키로 보낼 과목)")
+                .help("이 노트의 프로젝트(과목 설정). 다른 프로젝트로 옮기면 그 설정을 따릅니다")
+                if let proj, proj.course == nil {
+                    Button { ProjectEditorState.shared.edit(proj.id) } label: {
+                        Chip(text: "위키 과목 없음", systemImage: "exclamationmark.triangle", tint: .orange)
+                    }
+                    .buttonStyle(.plain).help("프로젝트 설정을 열어 위키 과목 폴더를 정하세요")
+                }
                 Menu {
-                    Button("프로젝트 없음") { store.move(session: session.id, to: nil) }
+                    Button("프로젝트 따름") { store.updateSession(session.id) { $0.languageOverride = nil } }
                     Divider()
-                    ForEach(store.projects) { p in Button(p.name) { store.move(session: session.id, to: p.id) } }
+                    Button("자동(한·영)") { store.updateSession(session.id) { $0.languageOverride = "auto" } }
+                    Button("한국어") { store.updateSession(session.id) { $0.languageOverride = "Korean" } }
+                    Button("영어") { store.updateSession(session.id) { $0.languageOverride = "English" } }
                 } label: {
-                    Chip(text: store.projects.first { $0.id == session.projectID }?.name ?? "프로젝트 없음", systemImage: "folder")
+                    let lang = store.languageArg(of: session)
+                    Chip(text: lang == "Korean" ? "한국어" : (lang == "English" ? "영어" : "자동(한·영)"), systemImage: "globe",
+                         tint: session.languageOverride == nil ? Color.secondary.opacity(0.55) : Color.accentColor)
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help(session.languageOverride == nil ? "받아쓰기 언어(프로젝트 설정을 따름). 이번 수업만 다르면 여기서 바꾸세요" : "이 노트만 따로 정한 받아쓰기 언어")
                 Button { hs.showTerms = true } label: {
                     Chip(text: "용어 힌트 \(session.terms.count)개", systemImage: "text.book.closed",
                          tint: AITasks.shared.running.contains("terms-\(session.id.uuidString)") ? .accentColor : .secondary)
@@ -522,7 +557,7 @@ struct TermsSheet: View {
                 Spacer()
                 Text("\(lines.count)개").font(.caption).foregroundStyle(.secondary)
             }
-            Text("한 줄에 하나씩. 받아쓰기(ASR)가 전공 용어·고유명사를 잘 알아듣도록 프로필 용어와 함께 씁니다.")
+            Text("한 줄에 하나씩. 받아쓰기(ASR)가 전공 용어·고유명사를 잘 알아듣도록 프로젝트 고정 용어와 함께 씁니다.")
                 .font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $st.text)
                 .font(.body)

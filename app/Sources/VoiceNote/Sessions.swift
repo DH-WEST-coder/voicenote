@@ -1,11 +1,38 @@
 import AVFoundation
 import Foundation
 
-/// 프로젝트 = 노트를 묶는 폴더(예: 과목, 인턴십)
+/// 프로젝트 = 과목. 노트 묶음이면서 과목 설정(위키 과목 폴더, 받아쓰기 언어, 고정 용어)을 가진다.
 struct Project: Codable, Identifiable, Equatable {
     var id = UUID()
     var name: String
     var createdAt = Date()
+    /// 위키 과목 폴더 이름. nil이면 위키로 보내지 않는다.
+    var course: String?
+    /// "" = 자동(한·영), "Korean", "English"
+    var language = ""
+    /// 고정 용어 힌트
+    var terms: [String] = []
+
+    init(name: String, course: String? = nil, language: String = "", terms: [String] = []) {
+        self.name = name; self.course = course; self.language = language; self.terms = terms
+    }
+
+    // 옛 projects.json(이름만 있던 형식)도 읽는다.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        course = try c.decodeIfPresent(String.self, forKey: .course)
+        language = try c.decodeIfPresent(String.self, forKey: .language) ?? ""
+        terms = try c.decodeIfPresent([String].self, forKey: .terms) ?? []
+    }
+}
+
+/// projects.json의 새 형식(version 2 = 과목 설정이 들어 있고 프로필 이전이 끝난 것)
+struct ProjectsFile: Codable {
+    var version = 2
+    var projects: [Project]
 }
 
 /// 노트 = 수업 1회. 녹음 여러 개, 내 노트, 자료, 채팅, 용어 힌트가 여기에 붙는다.
@@ -15,8 +42,11 @@ struct Session: Codable, Identifiable, Equatable {
     /// true면 AI 제목이 덮어쓸 수 있다. 사용자가 고치면 false.
     var titleIsAuto = true
     var createdAt: Date
+    /// 옛 필드(디코드 호환용, 쓰지 않는다). 과목·언어·고정 용어는 소속 프로젝트에서 읽는다.
     var profile: String
     var projectID: UUID?
+    /// 이 노트만 언어를 다르게: nil=프로젝트 따름, "auto", "Korean", "English"
+    var languageOverride: String?
     /// 녹음(Job) id, 시간 순서
     var recordingIDs: [UUID] = []
     var attachments: [Attachment] = []
@@ -76,12 +106,20 @@ extension Store {
     func saveSessions() {
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = [.prettyPrinted]
         if let d = try? enc.encode(sessions) { try? d.write(to: Paths.sessionsFile, options: .atomic) }
-        if let d = try? enc.encode(projects) { try? d.write(to: Paths.projectsFile, options: .atomic) }
+        if let d = try? enc.encode(ProjectsFile(projects: projects)) { try? d.write(to: Paths.projectsFile, options: .atomic) }
     }
 
     func loadSessions() {
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
-        if let d = try? Data(contentsOf: Paths.projectsFile) { projects = (try? dec.decode([Project].self, from: d)) ?? [] }
+        let fm = FileManager.default
+        // projects.json: 새 형식({"version":2,...})이면 이전 끝, 옛 배열이거나 없으면 이전 대상
+        var migrated = false
+        if let d = try? Data(contentsOf: Paths.projectsFile) {
+            if let f = try? dec.decode(ProjectsFile.self, from: d) { projects = f.projects; migrated = true }
+            else { projects = (try? dec.decode([Project].self, from: d)) ?? [] }
+        }
+        // 이전은 되돌릴 수 있게 먼저 백업한다(어떤 파일도 저장하기 전에).
+        if !migrated { backupBeforeMigration() }
         if let d = try? Data(contentsOf: Paths.sessionsFile) {
             sessions = (try? dec.decode([Session].self, from: d)) ?? []
         } else if !jobs.isEmpty {
@@ -91,7 +129,6 @@ extension Store {
                             profile: "", projectID: p.id)
             s.recordingIDs = jobs.sorted { $0.createdAt < $1.createdAt }.map(\.id)
             projects = [p]; sessions = [s]
-            saveSessions()
             log("migrated \(jobs.count) jobs into test session")
         }
         // 어느 노트에도 없는 녹음(예: 이전 버전에서 가져온 파일)은 각각 노트로 만든다.
@@ -102,6 +139,55 @@ extension Store {
             sessions.append(s)
         }
         sessions.sort { $0.createdAt > $1.createdAt }
+        if !migrated {
+            migrateProfilesToProjects()
+            saveSessions()
+        } else if !fm.fileExists(atPath: Paths.sessionsFile.path) && !sessions.isEmpty {
+            saveSessions()
+        }
+    }
+
+    // MARK: 프로필 → 프로젝트 이전 (한 번만)
+
+    private func backupBeforeMigration() {
+        let fm = FileManager.default
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = f.string(from: Date())
+        for u in [Paths.sessionsFile, Paths.projectsFile, Paths.profilesFile] where fm.fileExists(atPath: u.path) {
+            let dst = u.deletingLastPathComponent().appendingPathComponent(u.lastPathComponent + ".bak-" + stamp)
+            do { try fm.copyItem(at: u, to: dst); log("migration backup \(dst.lastPathComponent)") }
+            catch { log("migration backup failed \(u.lastPathComponent): \(error.localizedDescription)") }
+        }
+    }
+
+    private func nfc(_ s: String) -> String { s.precomposedStringWithCanonicalMapping }
+
+    /// 프로필마다 프로젝트를 만들고(같은 이름이 있으면 거기에 설정을 넣고), '프로젝트 없음' 노트를 옛 프로필 이름의 프로젝트로 옮긴다.
+    private func migrateProfilesToProjects() {
+        let legacy = Profiles.legacy()
+        var created = 0, filled = 0, moved = 0
+        for p in legacy {
+            if let i = projects.firstIndex(where: { nfc($0.name) == nfc(p.name) }) {
+                projects[i].course = p.course; projects[i].language = p.language; projects[i].terms = p.terms
+                filled += 1
+            } else {
+                projects.append(Project(name: p.name, course: p.course, language: p.language, terms: p.terms))
+                created += 1
+            }
+        }
+        for i in sessions.indices {
+            let prof = sessions[i].profile
+            if sessions[i].projectID == nil {
+                guard !prof.isEmpty, let pr = projects.first(where: { nfc($0.name) == nfc(prof) }) else { continue }
+                sessions[i].projectID = pr.id; moved += 1
+            }
+            // 프로젝트 언어와 옛 프로필 언어가 다르면 노트에만 언어를 따로 남긴다(예: 영어 프로필 노트가 한국어 프로젝트에 있는 경우).
+            if !prof.isEmpty, let pr = projects.first(where: { $0.id == sessions[i].projectID }),
+               let lp = legacy.first(where: { nfc($0.name) == nfc(prof) }), lp.language != pr.language, !lp.language.isEmpty {
+                sessions[i].languageOverride = lp.language
+            }
+        }
+        log("migrated profiles -> projects: created=\(created) filled=\(filled) notesMoved=\(moved)")
     }
 
     func updateSession(_ id: UUID, _ f: (inout Session) -> Void) {
@@ -112,26 +198,72 @@ extension Store {
     // MARK: 만들기·옮기기·지우기
 
     @discardableResult
-    func newSession(title: String? = nil, profile: String? = nil, projectID: UUID? = nil, select: Bool = true) -> Session {
+    /// projectID: 생략(nil)=기본 프로젝트, .some(nil)=프로젝트 없음
+    func newSession(title: String? = nil, projectID: UUID?? = nil, select: Bool = true) -> Session {
         let now = Date()
-        let s = Session(title: title ?? defaultTitle(now), createdAt: now, profile: profile ?? selectedProfile,
-                        projectID: projectID ?? selectedSession?.projectID ?? defaultProject(for: profile ?? selectedProfile))
+        let pid: UUID? = projectID ?? defaultProjectID()
+        let s = Session(title: title ?? defaultTitle(now, project: pid), createdAt: now, profile: "", projectID: pid)
         sessions.insert(s, at: 0)
         if select { selectedSessionID = s.id }
+        if pid != nil { lastProjectID = pid }
         saveSessions()
         return s
     }
 
-    /// 프로필의 과목 이름과 같은 프로젝트가 있으면 그 프로젝트에 넣는다.
-    func defaultProject(for profile: String) -> UUID? {
-        guard let c = Courses.course(forProfile: profile) else { return nil }
-        return projects.first { $0.name.precomposedStringWithCanonicalMapping == c.precomposedStringWithCanonicalMapping }?.id
+    /// 새 노트·녹음이 들어갈 프로젝트: lastProjectID(노트를 고르면 그 프로젝트로 따라가고, 도구막대 메뉴에서 바꾼다) > 프로젝트 없음
+    func defaultProjectID() -> UUID? {
+        if let id = lastProjectID, projects.contains(where: { $0.id == id }) { return id }
+        return nil
     }
 
-    func defaultTitle(_ d: Date) -> String {
+    func defaultTitle(_ d: Date, project: UUID?) -> String {
         let f = DateFormatter(); f.dateFormat = "M월 d일 HH:mm"
-        let c = Courses.course(forProfile: selectedProfile)
-        return (c.map { $0 + " " } ?? "") + f.string(from: d)
+        let name = projects.first { $0.id == project }?.name
+        return (name.map { $0 + " " } ?? "") + f.string(from: d)
+    }
+
+    // MARK: 프로젝트 설정 조회 (과목·언어·용어는 항상 여기서)
+
+    func project(of s: Session) -> Project? { projects.first { $0.id == s.projectID } }
+    func project(_ id: UUID?) -> Project? { projects.first { $0.id == id } }
+
+    /// 노트의 위키 과목 폴더(없으면 nil)
+    func course(of s: Session) -> String? {
+        guard let c = project(of: s)?.course, !c.isEmpty else { return nil }
+        return c
+    }
+
+    /// 엔진 --language 값: 노트 덮어쓰기 > 프로젝트 > 자동
+    func languageArg(of s: Session?) -> String {
+        let l = s?.languageOverride ?? s.flatMap { project(of: $0)?.language } ?? ""
+        return l.isEmpty ? "auto" : l
+    }
+
+    /// 프로젝트 고정 용어 + 노트 용어(중복 제거)
+    func allTerms(of s: Session?) -> [String] {
+        guard let s else { return [] }
+        var seen = Set<String>(), out: [String] = []
+        for t in (project(of: s)?.terms ?? []) + s.terms {
+            let k = t.lowercased()
+            if !t.isEmpty, seen.insert(k).inserted { out.append(t) }
+        }
+        return out
+    }
+
+    /// 엔진에 넘길 --language/--terms-file/--course 인자
+    func engineArgs(for s: Session?, course withCourse: Bool = true) -> [String] {
+        var a = ["--language", languageArg(of: s)]
+        if let s {
+            let terms = allTerms(of: s)
+            if !terms.isEmpty {
+                let tf = Paths.support.appendingPathComponent("terms/\(s.id.uuidString).txt")
+                try? FileManager.default.createDirectory(at: tf.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? terms.joined(separator: "\n").write(to: tf, atomically: true, encoding: .utf8)
+                a += ["--terms-file", tf.path]
+            }
+            if withCourse, let c = course(of: s) { a += ["--course", c] }
+        }
+        return a
     }
 
     func renameSession(_ id: UUID, _ title: String) {
@@ -140,7 +272,12 @@ extension Store {
         updateSession(id) { $0.title = t; $0.titleIsAuto = false }
     }
 
-    func move(session id: UUID, to project: UUID?) { updateSession(id) { $0.projectID = project } }
+    /// 노트를 다른 프로젝트로 옮긴다. 과목·언어·용어는 새 프로젝트 것을 따른다.
+    func move(session id: UUID, to project: UUID?) {
+        guard session(id)?.projectID != project else { return }
+        updateSession(id) { $0.projectID = project }
+        log("move session \(id) -> project \(project?.uuidString ?? "none")")
+    }
 
     func removeSession(_ id: UUID) {
         guard let s = session(id) else { return }
@@ -161,10 +298,17 @@ extension Store {
         projects[i].name = name; saveSessions()
     }
 
+    /// 프로젝트 설정 시트에서 저장(없는 id면 새로 만든다)
+    func saveProject(_ p: Project) {
+        if let i = projects.firstIndex(where: { $0.id == p.id }) { projects[i] = p } else { projects.append(p) }
+        saveSessions()
+    }
+
     /// 프로젝트를 지워도 노트는 지우지 않고 '프로젝트 없음'으로 옮긴다.
     func removeProject(_ id: UUID) {
         for i in sessions.indices where sessions[i].projectID == id { sessions[i].projectID = nil }
         projects.removeAll { $0.id == id }
+        if lastProjectID == id { lastProjectID = nil }
         saveSessions()
     }
 

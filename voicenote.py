@@ -298,8 +298,6 @@ def transcribe_file(args, rep):
         if profile.get("wiki_dir"):
             profile["wiki_dir"] = resolve_wiki_dir(profile["wiki_dir"])
         rep.emit("config", vault=load_config()["vault"], wiki_dir=profile.get("wiki_dir", "-"))
-    else:
-        load_profiles()   # 기본 프로필 파일 만들어 두기
     # 노트별 용어(앱이 강의자료에서 뽑은 것)와 언어: 프로필 값에 더하거나 덮어쓴다
     if args.terms_file:
         extra = [t.strip() for t in Path(args.terms_file).read_text().splitlines() if t.strip()]
@@ -310,6 +308,8 @@ def transcribe_file(args, rep):
         profile["terms"] = merged[:MAX_TERMS]
     if args.language:
         profile["language"] = None if args.language == "auto" else args.language
+    if args.course:
+        profile["course"] = args.course   # 앱의 프로젝트 과목(대본 frontmatter용)
     if not FLUID.exists():
         raise RuntimeError(f"fluidaudiocli가 없습니다: {FLUID}")
 
@@ -545,6 +545,7 @@ def main():
     t.add_argument("--json-progress", action="store_true")
     t.add_argument("--terms-file", help="용어 힌트 파일(한 줄에 하나). 프로필 용어에 더한다")
     t.add_argument("--language", help="Korean | English | auto (프로필 언어를 덮어씀)")
+    t.add_argument("--course", help="과목 이름(대본 frontmatter의 course). 앱 프로젝트에서 넘긴다")
     lv = sub.add_parser("live", help="실시간 받아쓰기: stdin 16kHz 모노 float32 PCM → JSON 줄")
     lv.add_argument("--model", default=LIVE_MODEL)
     lv.add_argument("--chunk-sec", type=float, default=2.0)

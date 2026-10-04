@@ -42,7 +42,7 @@ final class AITasks: ObservableObject {
             store.updateSession(id) { $0.termsNote = "연결된 강의자료가 없습니다. 자료를 넣으면 용어를 뽑을 수 있어요." }
             return
         }
-        let lang = Profiles.entry(s.profile).language
+        let lang = store.languageArg(of: s) == "auto" ? "" : store.languageArg(of: s)
         let wantImages = ChatSettings.shared.sendPageImages
         store.updateSession(id) { $0.termsNote = "용어 뽑는 중…" }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -118,7 +118,7 @@ final class AITasks: ObservableObject {
         let store = Store.shared
         guard !running.contains(key), let s = store.session(id), s.titleIsAuto else { return }
         let atts = s.attachments
-        let course = Courses.course(forProfile: s.profile)
+        let course = store.course(of: s)
         let week = VaultConfig.shared.week(of: s.createdAt)
         let f = DateFormatter(); f.dateFormat = "M월 d일"
         var prefix = ""

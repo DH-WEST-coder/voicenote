@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject private var profileEditor = ProfileEditorState.shared
     @EnvironmentObject var store: Store
     @ObservedObject var chat = ChatSettings.shared
     @ObservedObject var vault = VaultConfig.shared
@@ -109,26 +108,13 @@ struct SettingsView: View {
                 Text("위키의 auto_preprocess.sh를 앱의 자식 프로세스로 실행합니다(첫 실행은 시작 1분 뒤, 대본을 위키로 보낸 뒤 약 11분 후에도 실행). 로그: ~/Library/Application Support/VoiceNote/logs/autopreprocess.log")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("프로필") {
-                HStack {
-                    Button("새 프로필…") { ProfileEditorState.shared.new() }
-                    Menu("프로필 고치기") {
-                        ForEach(store.profiles, id: \.self) { p in Button(p) { ProfileEditorState.shared.edit(p) } }
-                    }
-                    .fixedSize()
-                    Button("profiles.json을 Finder에서 열기") {
-                        Profiles.ensureDefaults()
-                        NSWorkspace.shared.activateFileViewerSelecting([Paths.profilesFile])
-                    }
-                    Button("다시 읽기") { store.reloadProfiles() }
-                }
-                Text("용어/언어/course/wiki_dir을 수정한 뒤 '다시 읽기'를 누르세요. 단축키: ⌥⌘R (녹음 시작/정지)")
+            Section("프로젝트") {
+                Text("과목 설정(위키 과목 폴더·언어·고정 용어)은 왼쪽 목록의 프로젝트 우클릭 → '프로젝트 설정…'에서 고칩니다. 단축키: ⌥⌘R (녹음 시작/정지)")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .frame(width: 520)
-        .sheet(item: $profileEditor.editing) { e in ProfileEditor(editing: e).environmentObject(store) }
         .padding(.vertical, 8)
     }
 

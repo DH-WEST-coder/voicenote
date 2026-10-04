@@ -190,7 +190,8 @@ enum ChatContext {
 
     static func build(session: Session, question: String, now: Double?, notes: String, history: [ChatMessage],
                       prompts: ChatPrompts, settings: ChatSettings,
-                      transcript: [Line], materials: String, wiki: [WikiHit], imageCount: Int) -> String {
+                      transcript: [Line], materials: String, wiki: [WikiHit], imageCount: Int,
+                      course: String?, projectName: String?) -> String {
         var p = prompts.system + "\n\n"
         p += """
         [안전 규칙] 이 대화에서는 파일을 만들거나 고치거나 지우지 말고, 쓰기·삭제 명령을 실행하지 말 것. 읽기만 한다.
@@ -201,8 +202,7 @@ enum ChatContext {
             p += "\n셸 명령 실행(run_command)은 이 환경에서 막혀 있으니 시도하지 말 것. 파일 열람 도구(view_file)로 절대 경로를 직접 열어라. 목록에 없는 곳은 wiki/index.md 부터 따라가면 된다."
         }
         p += "\n\n"
-        let course = Courses.course(forProfile: session.profile)
-        p += "<수업 정보>\n제목: \(session.title)\n과목 프로필: \(session.profile.isEmpty ? "자동(없음)" : session.profile)"
+        p += "<수업 정보>\n제목: \(session.title)\n프로젝트: \(projectName ?? "없음")"
         if let course { p += "\n과목: \(course)" }
         if let w = VaultConfig.shared.week(of: session.createdAt) { p += "\n주차: \(w)주차" }
         if !session.terms.isEmpty { p += "\n용어 힌트(받아쓰기에 쓴 것): " + session.terms.prefix(40).joined(separator: ", ") }
@@ -473,7 +473,7 @@ final class ChatSession: ObservableObject {
 
         // 자료 본문·페이지 이미지·위키 고르기는 무거울 수 있어 백그라운드에서 한다.
         let atts = session.attachments
-        let course = Courses.course(forProfile: session.profile)
+        let course = store.course(of: session)
         let wantImages = settings.sendPageImages && engine != .lmstudio
         let wantWiki = settings.wikiRefEnabled
         let vault = settings.vaultPath, wikiCap = settings.wikiCap, matCap = settings.materialCap
@@ -496,7 +496,8 @@ final class ChatSession: ObservableObject {
                 MainActor.assumeIsolated {
                     let prompt = ChatContext.build(session: session, question: promptText, now: now, notes: notes, history: history,
                                                    prompts: prompts, settings: settings, transcript: lines, materials: mat,
-                                                   wiki: hits, imageCount: images.count)
+                                                   wiki: hits, imageCount: images.count,
+                                                   course: course, projectName: store.project(of: session)?.name)
                     let refs = hits.map(\.rel)
                     store.log("chat context chars=\(prompt.count) images=\(images.count) wiki=\(refs)")
                     if let i = self.messages.indices.last, !refs.isEmpty { self.messages[i].wikiRefs = refs }

@@ -173,7 +173,7 @@ final class LiveTranscriber: ObservableObject {
     // MARK: 시작·정지
 
     /// 녹음 시작 때 호출. inputFile이 있으면(디버그) 마이크 대신 엔진이 그 파일을 실시간 속도로 읽는다.
-    func start(jobID: UUID, profile: String, terms: [String], sessionID: UUID, inputFile: String?) {
+    func start(jobID: UUID, args extra: [String], inputFile: String?) {
         signal(SIGPIPE, SIG_IGN)
         let store = Store.shared
         if let old = current { old.process.terminate(); finishRun(old) }
@@ -194,13 +194,7 @@ final class LiveTranscriber: ObservableObject {
 
         let run = LiveRun(jobID: jobID, fileURL: file)
         var args = [script, "live", "--model", model, "--chunk-sec", String(chunk)]
-        if !profile.isEmpty { args += ["--profile", profile] }
-        if !terms.isEmpty {
-            let tf = Paths.support.appendingPathComponent("terms/\(sessionID.uuidString).txt")
-            try? fm.createDirectory(at: tf.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? terms.joined(separator: "\n").write(to: tf, atomically: true, encoding: .utf8)
-            args += ["--terms-file", tf.path]
-        }
+        args += extra
         if let f = inputFile { args += ["--input-file", f, "--realtime"] }
         let p = run.process
         p.executableURL = URL(fileURLWithPath: py)

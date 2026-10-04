@@ -23,8 +23,9 @@ enum WikiSender {
     static func send(_ id: UUID) {
         let store = Store.shared
         guard let s = store.session(id) else { return }
-        guard let course = Courses.course(forProfile: s.profile) else {
-            store.message = "노트의 프로필(과목)을 먼저 고르세요. 제목 아래 주황색 '프로필 없음'을 눌러 과목 프로필을 고른 뒤 다시 보내세요."
+        guard let course = store.course(of: s) else {
+            store.message = "프로젝트에 위키 과목 폴더를 정하세요. 프로젝트 설정을 엽니다."
+            if let p = s.projectID { ProjectEditorState.shared.edit(p) } else { ProjectEditorState.shared.new() }
             return
         }
         NoteController.shared.flush()
@@ -120,7 +121,7 @@ enum WikiSender {
         let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX"); df.dateFormat = "yyyy-MM-dd HH:mm"
         let hm = DateFormatter(); hm.locale = Locale(identifier: "en_US_POSIX"); hm.dateFormat = "HH:mm"
         let vault = VaultConfig.shared.vault
-        let lang = Profiles.entry(s.profile).language
+        let lang = Store.shared.languageArg(of: s) == "auto" ? "" : Store.shared.languageArg(of: s)
         let total = done.reduce(0.0) { $0 + $1.element.entry.duration }
         let engine = done.compactMap { $0.element.transcript?.meta["engine"] }.first ?? "unknown"
         var o = "---\ntype: voicenote-session\ncourse: \(yamlString(course))\ntitle: \(yamlString(s.title))\ndate: \(df.string(from: s.createdAt))\n"
