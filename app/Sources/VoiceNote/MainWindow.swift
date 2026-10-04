@@ -98,8 +98,13 @@ struct MainWindow: View {
                 Button { liveSettings.enabled.toggle() } label: {
                     Label(liveSettings.enabled ? "실시간 켬" : "실시간 끔",
                           systemImage: liveSettings.enabled ? "waveform" : "waveform.slash")
+                        .labelStyle(.titleAndIcon)
+                        .font(.callout.weight(.medium))
                         .foregroundStyle(liveSettings.enabled ? Color.accentColor : Color.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background((liveSettings.enabled ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
                 }
+                .buttonStyle(.plain)
                 .help(liveSettings.enabled ? "실시간 받아쓰기 켜짐 (녹음 중 대본 초안 표시). 누르면 끕니다. 녹음 중에는 다음 녹음부터 적용."
                                            : "실시간 받아쓰기 꺼짐. 누르면 켭니다.")
                 RecordButton()

@@ -7,8 +7,8 @@ import Foundation
 final class LiveSettings: ObservableObject {
     static let shared = LiveSettings()
     static let models: [(id: String, label: String)] = [
-        ("moona3k/mlx-qwen3-asr-0.6b-4bit", "0.6B 4bit (가벼움, 기본)"),
-        ("moona3k/mlx-qwen3-asr-1.7b-8bit", "1.7B 8bit (정확, 무거움)"),
+        ("moona3k/mlx-qwen3-asr-1.7b-8bit", "1.7B 8bit (정확, 기본)"),
+        ("moona3k/mlx-qwen3-asr-0.6b-4bit", "0.6B 4bit (가벼움, 오인식 많음)"),
     ]
     static let intervals: [Double] = [1, 2, 3, 5]
 
