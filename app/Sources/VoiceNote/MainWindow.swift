@@ -58,6 +58,7 @@ struct MainWindow: View {
     @ObservedObject private var sidebar = SidebarState.shared
     @ObservedObject fileprivate var importer = MaterialImporter.shared
     @ObservedObject private var profileEditor = ProfileEditorState.shared
+    @ObservedObject private var liveSettings = LiveSettings.shared
 
     var body: some View {
         NavigationSplitView {
@@ -94,7 +95,13 @@ struct MainWindow: View {
                 .help("다음 새 노트에 쓸 과목 프로필(용어 힌트·위키 폴더)")
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                // 모드 선택(실시간/녹음 후 처리)은 2단계 실시간 받아쓰기와 함께 다시 넣는다.
+                Button { liveSettings.enabled.toggle() } label: {
+                    Label(liveSettings.enabled ? "실시간 켬" : "실시간 끔",
+                          systemImage: liveSettings.enabled ? "waveform" : "waveform.slash")
+                        .foregroundStyle(liveSettings.enabled ? Color.accentColor : Color.secondary)
+                }
+                .help(liveSettings.enabled ? "실시간 받아쓰기 켜짐 (녹음 중 대본 초안 표시). 누르면 끕니다. 녹음 중에는 다음 녹음부터 적용."
+                                           : "실시간 받아쓰기 꺼짐. 누르면 켭니다.")
                 RecordButton()
                 Button { layout.showChat.toggle() } label: {
                     Label("채팅", systemImage: layout.showChat ? "sidebar.trailing" : "bubble.left.and.bubble.right")
@@ -557,8 +564,10 @@ final class TranscriptState: ObservableObject {
         case header(part: Int, entry: TimelineEntry)
         case status(part: Int, entry: TimelineEntry)
         case line(CombinedTranscript.Line, showSpeaker: Bool, first: Bool)
+        case partial(part: Int)
         var id: String {
             switch self {
+            case .partial(let p): return "p-\(p)"
             case .header(let p, _): return "h-\(p)"
             case .status(let p, _): return "s-\(p)"
             case .line(let l, _, _): return l.id
@@ -579,13 +588,14 @@ struct TranscriptView: View {
     @EnvironmentObject var store: Store
     @ObservedObject var player = AudioPlayer.shared
     @ObservedObject var power = PowerMonitor.shared
+    @ObservedObject var liveT = LiveTranscriber.shared
     let session: Session
     @StateObject private var st = TranscriptState()
 
     /// 대본이 바뀔 때만 다시 읽도록 하는 표식
     private var signature: String {
         store.recordings(of: session).map { "\($0.id)\($0.status.rawValue)\($0.transcriptPath ?? "")\($0.duration ?? 0)" }.joined(separator: ",")
-            + "-\(store.transcriptRevision)"
+            + "-\(store.transcriptRevision)-\(liveT.revision)"
     }
 
     var body: some View {
@@ -631,11 +641,13 @@ struct TranscriptView: View {
                 for (i, l) in mine.enumerated() {
                     rows.append(.line(l, showSpeaker: i == 0 || mine[i - 1].speaker != l.speaker, first: i == 0))
                 }
+                if p.entry.job.status == .recording && liveT.isActive(p.entry.job.id) { rows.append(.partial(part: pi)) }
             } else {
                 rows.append(.status(part: pi, entry: p.entry))
             }
         }
         st.rows = rows; st.lines = all; st.speakers = c.speakers
+        st.live = c.parts.contains { $0.entry.job.status == .recording }
     }
 
     // MARK: 재생 막대·화자 칩
@@ -717,6 +729,9 @@ struct TranscriptView: View {
                 .onChange(of: st.rows.count) { _, _ in
                     if st.live, let last = st.rows.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
+                .onChange(of: liveT.partial) { _, _ in
+                    if st.live, let last = st.rows.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
             }
         }
     }
@@ -730,14 +745,27 @@ struct TranscriptView: View {
         switch r {
         case .header(_, let e): header(e)
         case .status(_, let e): statusRow(e)
+        case .partial:
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("…").font(.caption).foregroundStyle(.tertiary).frame(width: 52, alignment: .trailing)
+                Text(liveT.partial.isEmpty ? liveT.statusText : liveT.partial).font(.body).lineSpacing(4)
+                    .foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 5).padding(.horizontal, 6)
         case .line(let l, let showSpeaker, let first):
             let idx = st.speakers.firstIndex(of: l.speaker) ?? 0
             VStack(alignment: .leading, spacing: 3) {
                 if showSpeaker {
                     HStack(spacing: 6) {
-                        Circle().fill(Theme.speakerColor(idx)).frame(width: 8, height: 8)
-                        Text(l.speaker).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.speakerColor(idx))
-                            .onTapGesture { openRename(l.speaker) }
+                        if l.isLive {
+                            Image(systemName: "waveform").font(.caption).foregroundStyle(.secondary)
+                            Text("실시간 초안").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                            Text("정밀본이 나오면 바뀝니다").font(.caption).foregroundStyle(.tertiary)
+                        } else {
+                            Circle().fill(Theme.speakerColor(idx)).frame(width: 8, height: 8)
+                            Text(l.speaker).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.speakerColor(idx))
+                                .onTapGesture { openRename(l.speaker) }
+                        }
                     }
                     .padding(.top, first ? 2 : 12)
                 }
@@ -785,7 +813,13 @@ struct TranscriptView: View {
             switch job.status {
             case .recording:
                 Label("녹음 중 \(formatTime(store.elapsed))", systemImage: "record.circle.fill").foregroundStyle(.red)
-                Text("대본은 녹음이 끝난 뒤 처리됩니다. 아래 노트에는 누적 시각이 붙습니다.").font(.caption).foregroundStyle(.secondary)
+                if liveT.isActive(job.id) {
+                    Text(liveT.partial.isEmpty ? liveT.statusText : liveT.partial).font(.callout).foregroundStyle(.tertiary).lineLimit(3)
+                } else if case .failed = liveT.status, liveT.activeJobID == job.id {
+                    Text(liveT.statusText).font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("대본은 녹음이 끝난 뒤 처리됩니다. 아래 노트에는 누적 시각이 붙습니다.").font(.caption).foregroundStyle(.secondary)
+                }
             case .queued:
                 Label(store.chargingOnly && !power.onAC ? "충전 연결 대기 중 (설정: 충전 중일 때만 처리)" : "대기 중",
                       systemImage: store.chargingOnly && !power.onAC ? "bolt.slash" : "clock")

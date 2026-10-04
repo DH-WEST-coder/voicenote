@@ -207,6 +207,15 @@ extension Store {
         for e in timeline(of: s) {
             var part = CombinedTranscript.Part(entry: e, transcript: nil)
             if e.job.status == .done, let p = e.job.transcriptPath { part.transcript = TranscriptIO.load(path: p) }
+            // 정밀본이 아직 없으면 실시간 초안을 쓴다(화자 없음)
+            if part.transcript == nil {
+                let live = LiveTranscriber.shared.lines(for: e.job)
+                if !live.isEmpty {
+                    var t = Transcript()
+                    t.segments = live.enumerated().map { i, l in Segment(id: i, time: l.time, timeLabel: formatTime(l.time), speaker: "실시간", text: l.text) }
+                    part.transcript = t; part.isLive = true
+                }
+            }
             out.parts.append(part)
         }
         return out
@@ -214,25 +223,31 @@ extension Store {
 }
 
 struct CombinedTranscript {
-    struct Part { let entry: TimelineEntry; var transcript: Transcript? }
+    struct Part { let entry: TimelineEntry; var transcript: Transcript?; var isLive = false }
     var parts: [Part] = []
 
     /// 누적 시각이 붙은 줄들
-    struct Line: Identifiable { let id: String; let part: Int; let time: Double; let speaker: String; let text: String; let jobID: UUID }
+    struct Line: Identifiable { let id: String; let part: Int; let time: Double; let speaker: String; let text: String; let jobID: UUID; var isLive = false }
     var lines: [Line] {
         parts.enumerated().flatMap { pi, p in
             (p.transcript?.segments ?? []).map { seg in
-                Line(id: "\(pi)-\(seg.id)", part: pi, time: p.entry.offset + seg.time, speaker: seg.speaker, text: seg.text, jobID: p.entry.job.id)
+                Line(id: "\(pi)-\(seg.id)", part: pi, time: p.entry.offset + seg.time, speaker: seg.speaker, text: seg.text, jobID: p.entry.job.id, isLive: p.isLive)
             }
         }
     }
     var speakers: [String] {
         var seen: [String] = []
-        for l in lines where !seen.contains(l.speaker) { seen.append(l.speaker) }
+        for l in lines where !l.isLive && !seen.contains(l.speaker) { seen.append(l.speaker) }
         return seen
     }
     /// AI 맥락용 텍스트 줄: "[m:ss] 화자: 내용"
     var textLines: [ChatContext.Line] {
-        lines.map { ChatContext.Line(time: $0.time, text: "[\(formatTime($0.time))] \($0.speaker): \($0.text)") }
+        var out = lines.map { l in
+            ChatContext.Line(time: l.time, text: l.isLive ? "[\(formatTime(l.time))] (실시간 초안) \(l.text)" : "[\(formatTime(l.time))] \(l.speaker): \(l.text)")
+        }
+        if lines.contains(where: \.isLive) {
+            out.insert(ChatContext.Line(time: 0, text: "[참고] '(실시간 초안)' 표시가 붙은 줄은 실시간 받아쓰기라 오인식이 더 많을 수 있다."), at: 0)
+        }
+        return out
     }
 }

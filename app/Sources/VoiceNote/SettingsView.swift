@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject var chat = ChatSettings.shared
     @ObservedObject var vault = VaultConfig.shared
     @ObservedObject var ap = AutoPreprocess.shared
+    @ObservedObject var live = LiveSettings.shared
 
     var body: some View {
         let engineOK = FileManager.default.isExecutableFile(atPath: store.enginePath + "/.venv/bin/python")
@@ -47,6 +48,17 @@ struct SettingsView: View {
                     }
                 }
                 Text("엔진은 앱 전용 임시 폴더에서 읽기 전용(agy: --sandbox+헤드리스 권한 자동 거부, codex: read-only 샌드박스)으로 실행됩니다. 빠른 버튼·지시문은 chat_prompts.json에서 고칩니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("실시간 받아쓰기") {
+                Toggle("녹음 중 실시간으로 대본 초안 보기", isOn: $live.enabled)
+                Picker("모델", selection: $live.model) {
+                    ForEach(LiveSettings.models, id: \.id) { Text($0.label).tag($0.id) }
+                }
+                Picker("갱신 간격", selection: $live.chunkSec) {
+                    ForEach(LiveSettings.intervals, id: \.self) { Text("\(Int($0))초").tag($0) }
+                }
+                Text("녹음이 끝나면 정밀 받아쓰기(1.7B + 화자 분리)가 따로 돌아 초안을 대체합니다. 실시간은 화자 구분이 없고 오인식이 더 많을 수 있습니다. 간격이 짧을수록 빨리 보이지만 전력을 더 씁니다. 값은 녹음을 시작할 때 읽으니 녹음 중에 바꾸면 다음 녹음부터 적용됩니다. 처음 쓰는 모델은 내려받느라 시간이 걸립니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("배터리") {

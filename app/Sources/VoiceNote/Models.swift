@@ -26,6 +26,8 @@ struct Job: Codable, Identifiable, Equatable {
     /// 위키 transcript 폴더로 보낸 사본 경로(앱이 새로 만든 파일)
     var wikiPath: String?
     var error: String?
+    /// 실시간 받아쓰기 초안 파일(transcripts/live/<id>.md). 정밀본이 나와도 지우지 않는다.
+    var liveTranscriptPath: String?
     /// 배터리로 돌 때 모은 소비 전력 합계(W)·표본 수·사용한 배터리 %p (PowerMonitor가 갱신)
     var powerSumW: Double?
     var powerSamples: Int?
@@ -58,6 +60,7 @@ enum Paths {
     static var base: URL { sandbox ?? home.appendingPathComponent("Documents/VoiceNote") }
     static var recordings: URL { base.appendingPathComponent("recordings") }
     static var transcripts: URL { base.appendingPathComponent("transcripts") }
+    static var liveTranscripts: URL { transcripts.appendingPathComponent("live") }
     static var notes: URL { base.appendingPathComponent("notes") }
     static var chats: URL { base.appendingPathComponent("chats") }
     /// PPTX를 바꾼 PDF(앱 보기·Goodnotes용)

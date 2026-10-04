@@ -35,6 +35,8 @@ final class Store: ObservableObject {
     private var runningID: UUID?
     private var runningProcess: Process?
     private var _recordTarget: UUID?
+    /// 디버그: 마이크 대신 이 오디오 파일을 실시간 속도로 엔진에 넣고 녹음처럼 동작한다(--live-input-file)
+    nonisolated(unsafe) static var liveInputFile: String?
 
     private init() {
         let args = CommandLine.arguments
@@ -44,6 +46,7 @@ final class Store: ObservableObject {
         }
         if args.contains("--power-selftest") { print(PowerMonitor.selfTest()); exit(0) }
         if let sb = value("--sandbox") { Paths.sandbox = URL(fileURLWithPath: sb) }
+        if let lf = value("--live-input-file") { Store.liveInputFile = lf }
         let d = UserDefaults.standard
         enginePath = value("--engine") ?? d.string(forKey: "enginePath") ?? "/Users/DH_WEST/LocalAI_Project/voice"
         exportEnabled = value("--export-dir") != nil ? true : d.bool(forKey: "exportEnabled")
@@ -139,6 +142,15 @@ final class Store: ObservableObject {
                     let a = self.nextLine(of: sp, after: 0, in: ls), b = self.nextLine(of: sp, after: a?.time ?? 0, in: ls)
                     self.log("debug jump from 0 -> \(a.map { formatTime($0.time) } ?? "-"), then -> \(b.map { formatTime($0.time) } ?? "-")")
                 }
+                // 디버그: --debug-record <초>  1.5초 뒤 녹음을 시작하고 N초 뒤 정지한다(--live-input-file과 함께 sandbox 시험용).
+                if let rs = value("--debug-record"), let secs = Double(rs) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        MainActor.assumeIsolated {
+                            Store.shared.startRecording()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + secs) { MainActor.assumeIsolated { Store.shared.stopRecording() } }
+                        }
+                    }
+                }
                 if let snap = snapshot { DebugSnapshot.schedule(path: snap, after: snapAfter, quit: args.contains("--snapshot-quit")) }
                 self.pump()
                 AutoPreprocess.shared.start(debugDryRunNow: args.contains("--autopreprocess-dry-run-now"))
@@ -205,6 +217,7 @@ final class Store: ObservableObject {
     }
 
     private func requestMicAndRecord() {
+        if Store.liveInputFile != nil { beginRecording(); return }   // 디버그: 마이크 안 씀
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: beginRecording()
         case .notDetermined:
@@ -228,7 +241,8 @@ final class Store: ObservableObject {
         guard !isRecording else { return }
         try? FileManager.default.createDirectory(at: Paths.recordings, withIntermediateDirectories: true)
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HHmmss"
-        let url = Paths.recordings.appendingPathComponent("녹음 \(f.string(from: Date())).m4a")
+        var url = Paths.recordings.appendingPathComponent("녹음 \(f.string(from: Date())).m4a")
+        if let lf = Store.liveInputFile { url = URL(fileURLWithPath: lf) }
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: 48000,
@@ -236,9 +250,12 @@ final class Store: ObservableObject {
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
         ]
         do {
-            let r = try AVAudioRecorder(url: url, settings: settings)
-            guard r.prepareToRecord(), r.record() else { message = "녹음을 시작할 수 없습니다."; return }
-            recorder = r; recordURL = url; recordStart = Date()
+            if Store.liveInputFile == nil {
+                let r = try AVAudioRecorder(url: url, settings: settings)
+                guard r.prepareToRecord(), r.record() else { message = "녹음을 시작할 수 없습니다."; return }
+                recorder = r
+            }
+            recordURL = url; recordStart = Date()
             isRecording = true; elapsed = 0; message = nil
             // 녹음 중에도 노트를 쓸 수 있도록 작업을 바로 만든다(status=recording).
             let target = session(_recordTarget) ?? newSession()
@@ -248,6 +265,10 @@ final class Store: ObservableObject {
             updateSession(target.id) { $0.recordingIDs.append(job.id) }
             selectedSessionID = target.id
             trackPower(job.id)
+            if LiveSettings.shared.enabled {
+                LiveTranscriber.shared.start(jobID: job.id, profile: target.profile, terms: target.terms,
+                                             sessionID: target.id, inputFile: Store.liveInputFile)
+            }
             recordTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
                 MainActor.assumeIsolated {
                     let s = Store.shared
@@ -265,6 +286,7 @@ final class Store: ObservableObject {
         recorder?.stop(); recorder = nil
         recordTimer?.invalidate()
         isRecording = false
+        if let id = recordingJobID { LiveTranscriber.shared.stop(jobID: id) }
         log("recording stop \(url.path) \(elapsed)s")
         if let id = recordingJobID, jobs.contains(where: { $0.id == id }) {
             let dur = elapsed
@@ -316,6 +338,7 @@ final class Store: ObservableObject {
         if recordingJobID == id {
             recorder?.stop(); recorder = nil; recordTimer?.invalidate(); isRecording = false; recordingJobID = nil
             PowerMonitor.shared.end(id)
+            LiveTranscriber.shared.abort()
         }
         if runningID == id { runningProcess?.terminate() }
         jobs.removeAll { $0.id == id }
@@ -479,6 +502,7 @@ final class Store: ObservableObject {
 
     private func shutdown() {
         if isRecording { recorder?.stop() } // 파일은 그대로 남는다
+        LiveTranscriber.shared.abort()
         runningProcess?.terminate()
         saveState()
     }
