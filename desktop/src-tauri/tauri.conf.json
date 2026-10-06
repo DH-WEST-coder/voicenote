@@ -43,7 +43,7 @@
     ],
     "macOS": {
       "infoPlist": "Info.plist",
-      "minimumSystemVersion": "26.2",
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     },
     "resources": {

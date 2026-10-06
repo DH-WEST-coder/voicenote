@@ -48,9 +48,9 @@ HF_HOME="$(pwd)/out/dist-test/model-status/models" \
 
 전체 패키징은 프로젝트 루트에서 `scripts/build_mac.sh`로 실행한다. 새 설치 없이 `.venv-dist`, npm/Cargo 캐시, 빌드된 FluidAudio, 기존 Codex 사이드카를 사용한다. `scripts/vnote-engine.spec`는 GPU를 초기화하지 않는 정적 수집으로 MLX·ASR·huggingface_hub를 포함한다. 빌드 임시 폴더는 `dist-build/`다.
 
-타깃은 `aarch64-apple-darwin`만 지원한다. `MACOSX_DEPLOYMENT_TARGET=26.2`와 Cargo offline을 적용한다. 현재 MLX 0.32.3의 `libmlx.dylib`에서 `LC_BUILD_VERSION minos 26.2`를 확인했다(FluidAudio 자체는 14.0). 따라서 이번 배포판은 macOS 26.2 이상이다.
+타깃은 `aarch64-apple-darwin`만 지원한다. `MACOSX_DEPLOYMENT_TARGET=14.0`과 Cargo offline을 적용한다. `.venv-dist`의 MLX·mlx-metal 0.32.3은 `macosx_14_0_arm64` 휠이어야 하며, 빌드 후 앱의 모든 Mach-O `LC_BUILD_VERSION minos`가 14.0 이하인지 검사한다. 따라서 지원 최소 버전은 macOS 14.0 (Sonoma)이다.
 
-빌드 순서: 엔진 → FluidAudio 사이드카·SwiftPM 리소스 → Tauri app/dmg → 모든 Mach-O/프레임워크 ad-hoc 서명 → 번들 엔진 모델 없는 smoke test → 서명된 앱으로 DMG 재생성·검증. 기본 `hdiutil create`가 디스크 장치 오류로 실패하면 HFS hybrid 파일을 생성하고 UDZO로 변환한다. `--options 0`으로 hardened runtime의 Python dylib Team ID 충돌을 피한다. Apple Developer ID·공증은 없다.
+빌드 순서: 엔진 → FluidAudio 사이드카·SwiftPM 리소스 → Tauri app → PyInstaller 원본 symlink 복원 → 모든 Mach-O/프레임워크 ad-hoc 서명 → 번들 엔진 모델 없는 smoke test → 앱 minos 검사 → 수정된 앱으로 DMG 생성·검증 및 마운트 내 symlink 검사. 기본 `hdiutil create`가 디스크 장치 오류로 실패하면 HFS hybrid 파일을 생성하고 UDZO로 변환한다. `--options 0`으로 hardened runtime의 Python dylib Team ID 충돌을 피한다. Apple Developer ID·공증은 없다.
 
 결과: `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/VNote.app`, `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/VNote_0.1.0_aarch64.dmg`. 사용자 문서·라이선스는 루트 `release/`, 작업 검증·Opus 명령은 `DIST_3_REPORT.md`다.
 

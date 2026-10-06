@@ -6,7 +6,7 @@ cd "$ROOT"
 mkdir -p dist-build/tmp
 export TMPDIR="$ROOT/dist-build/tmp"
 export CARGO_NET_OFFLINE=true
-export MACOSX_DEPLOYMENT_TARGET=26.2
+export MACOSX_DEPLOYMENT_TARGET=14.0
 scripts/build_engine.sh
 scripts/build_sidecars.sh
 cd desktop
@@ -18,6 +18,7 @@ cd "$ROOT"
 BUNDLE="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle"
 APP="$BUNDLE/macos/VNote.app"
 scripts/sign_app.sh "$APP"
+scripts/check_app_minos.py "$APP" 14.0
 SMOKE="$(mktemp -d "$ROOT/dist-build/tmp/bundle-smoke.XXXXXX")"
 mkdir -p "$SMOKE/models" "$SMOKE/tmp"
 ENGINE="$APP/Contents/Resources/vnote-engine/vnote-engine"
@@ -41,6 +42,15 @@ if ! hdiutil create -volname VNote -srcfolder "$STAGE" -format UDZO -ov "$DMG"; 
   hdiutil convert "$HYBRID" -format UDZO -o "$DMG"
 fi
 hdiutil verify "$DMG"
+# ตรวจ 링크는 서명된 앱을 담은 최종 DMG 안에서 수행한다.
+MOUNT="$ROOT/dist-build/tmp/dmg-link-check"
+mkdir -p "$MOUNT"
+hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG"
+detach_dmg() { hdiutil detach "$MOUNT" >/dev/null 2>&1 || true; }
+trap detach_dmg EXIT
+scripts/engine_symlinks.py check "$ROOT/dist-build/engine/vnote-engine" "$MOUNT/VNote.app/Contents/Resources/vnote-engine"
+detach_dmg
+trap - EXIT
 codesign --verify --deep --strict --verbose=2 "$APP"
 echo "DMG: $DMG"
 stat -f '크기: %z bytes' "$DMG"

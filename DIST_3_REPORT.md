@@ -26,14 +26,14 @@
 - spec은 MLX·mlx-qwen3-asr·huggingface_hub 모듈을 **파일 목록에서 정적으로 수집**. `collect_all`은 이 환경에서 MLX 모듈을 import하며 Metal 초기화 및 nanobind 중복 등록으로 실패했다. 정적 수집은 같은 모듈·데이터·dylib를 import 없이 수집한다. SoundFile의 네이티브 라이브러리는 PyInstaller hook으로 포함.
 - `scripts/build_sidecars.sh`: 기존 FluidAudio 바이너리와 SwiftPM 데이터 번들 복사. 기존 Codex 사이드카 포함. 생성 리소스·바이너리는 gitignore.
 - `engine.rs`: `VNOTE_ENGINE_CMD`가 있으면 사용, 없으면 `<resource_dir>/vnote-engine/vnote-engine`. FluidAudio는 번들 `Contents/MacOS/fluidaudiocli`. `VNOTE_DATA_DIR`, `HF_HOME`, `TMPDIR` 전달 유지.
-- Tauri `bundle.resources`, `externalBin`, ad-hoc signingIdentity `-`, macOS 최소 26.2 설정. 마이크 한국어 설명은 기존 `Info.plist`에서 번들에 들어간 것 확인.
-- `scripts/sign_app.sh`: 모든 Mach-O·프레임워크·SwiftPM 리소스 번들을 안쪽부터 ad-hoc 서명. `--options 0`으로 PyInstaller hardened runtime의 Python dylib Team ID 로딩 충돌 해결.
-- `scripts/build_mac.sh`: 엔진 → 사이드카 → Tauri app/dmg → 모든 실행 파일 서명 → 모델 없는 번들 smoke test → 서명한 앱으로 DMG 재생성·검증. Tauri DMG 보조 스크립트 실패 때 app 빌드를 별도로 재검증. 기본 `hdiutil create`가 장치 오류로 실패하면 **HFS hybrid 파일 생성 후 UDZO 변환**으로 완료한다.
+- Tauri `bundle.resources`, `externalBin`, ad-hoc signingIdentity `-`, macOS 최소 14.0 설정. 마이크 한국어 설명은 기존 `Info.plist`에서 번들에 들어간 것 확인.
+- `scripts/sign_app.sh`: PyInstaller 원본 엔진의 symlink를 앱 리소스에 복원한 뒤 모든 Mach-O·프레임워크·SwiftPM 리소스 번들을 안쪽부터 ad-hoc 서명. `--options 0`으로 PyInstaller hardened runtime의 Python dylib Team ID 로딩 충돌 해결.
+- `scripts/build_mac.sh`: 엔진 → 사이드카 → Tauri app → symlink 복원·서명 → 모델 없는 번들 smoke test → Mach-O minos 검사 → 서명한 앱으로 DMG 생성·검증. DMG를 읽기 전용 마운트해 앱 엔진 symlink도 원본과 비교한다. Tauri DMG 보조 스크립트 실패 때 app 빌드를 별도로 재검증. 기본 `hdiutil create`가 장치 오류로 실패하면 **HFS hybrid 파일 생성 후 UDZO 변환**으로 완료한다.
 - `package.json`, `Cargo.toml`, `tauri.conf.json` 모두 기존 0.1.0 일치 확인. 업데이트 확인은 `app.package_info().version` 사용.
 - `release/README.md`, `release/LICENSES.md`, `release/licenses/`, `release/images/README.md`: 사용자 설치·모델·연결·개인정보·문제 해결, 모델 출처/변환 표시, pyannote CC-BY-4.0, Python/npm/Cargo 및 FluidAudio 내장 구성 요소 고지. `scripts/generate_licenses.py`는 로컬 metadata에서 재생성.
 - `scripts/opus_verify.sh`: 실제 모델·Metal 확인 명령. 여기서는 실행하지 않음.
 
-최소 OS 근거: 설치된 MLX 0.32.3 wheel 태그 `macosx_26_0_arm64`, `otool -l .venv-dist/lib/python3.12/site-packages/mlx/lib/libmlx.dylib`의 `LC_BUILD_VERSION minos 26.2`. FluidAudio는 자체 minos 14.0. 이번 바이너리 묶음은 **macOS 26.2 이상**이다. 이전 버전 지원에는 호환 MLX 바이너리의 별도 준비·재검증이 필요하다. 새 패키지는 설치하지 않았다.
+최소 OS 근거: 준비된 `.venv-dist`의 MLX·mlx-metal 0.32.3 WHEEL 태그가 `macosx_14_0_arm64`이며, 빌드 스크립트가 앱 안 모든 Mach-O의 `LC_BUILD_VERSION minos`를 14.0 이하로 검사한다. 최소 지원 OS는 **macOS 14.0 (Sonoma)**이다. 빌드 스크립트는 호환 휠을 자동 설치하지 않으며 태그가 다르면 수동 설치 방법을 안내하고 실패한다.
 
 ## 실제 패키징 결과
 
@@ -87,6 +87,26 @@ cd /Users/DH_WEST/LocalAI_Project/voice-dist
 scripts/build_mac.sh
 scripts/opus_verify.sh '/시험/한국어3분.wav' '/시험/영어2분.wav'
 ```
+
+## 2026-10-06 후속 수정 및 재검증
+
+- `scripts/engine_symlinks.py`: PyInstaller 원본의 모든 symlink를 번들 앱에 복원하고, 최종 DMG 마운트본에서 상대 경로·symlink 상태를 검사한다.
+- `scripts/build_engine.sh`: MLX·mlx-metal WHEEL 태그가 `macosx_14_0_arm64`인지 확인한다. 다르면 수동 wheel 준비·설치 명령을 안내하고 종료한다. 자동 설치/네트워크 사용은 없다.
+- `scripts/check_app_minos.py`: 앱 내 Mach-O의 `LC_BUILD_VERSION minos`가 14.0 이하인지 검사한다.
+- `scripts/build_mac.sh`, `scripts/sign_app.sh`, `scripts/opus_verify.sh`: symlink 복원 후 서명, DMG 생성 뒤 읽기 전용 attach 및 검증, Opus 검증도 DMG 안 앱에서 진행하도록 변경.
+- `tauri.conf.json`, 배포/개발 README의 최소 지원을 macOS 14.0 (Sonoma)으로 수정.
+
+실행 결과:
+
+| 명령 | 결과 |
+|---|---|
+| `scripts/build_mac.sh` | 부분 실패: 앱 빌드·ad-hoc 서명·모델 없는 smoke test·189개 Mach-O minos 검사·DMG 생성·CRC 검증 통과. 마지막 `hdiutil attach -readonly -nobrowse`에서 `장치가 구성되지 않았음`으로 종료 코드 1. DMG 내부 symlink 검사는 이 환경에서 실행 불가. |
+| `scripts/engine_symlinks.py check dist-build/engine/vnote-engine <앱>/Contents/Resources/vnote-engine` | 통과, 원본 symlink 2개 일치. |
+| `.venv-dist/bin/python -m pytest -q tests` | 42 passed. |
+| `cargo test --offline` (`desktop/src-tauri`) | 18 passed. |
+| DMG `hdiutil verify` | CRC32 유효. 크기 225,764,846 bytes. |
+
+DMG: `desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/VNote_0.1.0_aarch64.dmg`. 이 실행 환경에서 이미지 attach가 막혀 DMG 안 링크 검사와 `opus_verify.sh`의 Metal·실제 모델 검증은 완료하지 못했다. Opus가 attach 가능한 맥에서 재검증해야 한다.
 
 `opus_verify.sh`가 실행하는 명령: 번들 모델 full 다운로드·status, config의 선택 모델·모든 다운로드 완료 확인, 한국어·영어 일괄 처리와 화자 분리, 한국어 앞 30초 live. 생성 대본·JSONL을 이전 Opus 기준과 비교한다. 경량 세트도 확인하려면 같은 격리 환경에서 `models download --set lite --json` 후 config 모델이 0.6B인지 확인한다.
 

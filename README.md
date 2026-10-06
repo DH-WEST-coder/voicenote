@@ -43,6 +43,6 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **NOW**: 배포판 3단계 구현·서명된 앱 검증 완료. DMG 전체 빌드·서명·번들 smoke test 완료. Git 커밋은 실행 환경 제한으로 미완료.
-- **NEXT**: 권한 있는 환경에서 A/B 커밋, Opus의 Metal·모델·설치 확인. [검증 보고](DIST_3_REPORT.md)
+- **NOW**: MLX symlink 복원과 macOS 14.0 최소 버전을 반영. pytest 42개·Rust 18개, 앱 서명 및 189개 Mach-O minos 검사 통과. DMG 생성·CRC 검증 통과.
+- **NEXT**: 디스크 장치 접근이 가능한 환경에서 DMG attach 검사와 Opus Metal·모델·설치 확인 후 배포판 보관. [검증 보고](DIST_3_REPORT.md)
 - **DONE (2026-10-06)**: Opus 검토 다운로드 버그 수정·회귀 테스트, Rust/TSX 포맷. pytest 42개·Rust 18개·프런트 빌드 통과. 엔진 onedir·FluidAudio/Codex·SwiftPM 리소스 번들, ad-hoc 서명·모델 없는 번들 명령 검증, 배포 문서·라이선스 고지.

@@ -4,7 +4,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [[ $# == 2 ]] || { echo '사용: scripts/opus_verify.sh 한국어.wav 영어.wav' >&2; exit 2; }
 [[ -f "$1" && -f "$2" ]] || { echo '시험 오디오 파일이 없습니다' >&2; exit 2; }
-APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/VNote.app"
+DMG="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/VNote_0.1.0_aarch64.dmg"
+[[ -f "$DMG" ]] || { echo "DMG를 찾을 수 없습니다: $DMG" >&2; exit 1; }
+MOUNT="$ROOT/dist-build/tmp/opus-dmg-mount"
+mkdir -p "$MOUNT"
+hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG"
+detach_dmg() { hdiutil detach "$MOUNT" >/dev/null 2>&1 || true; }
+trap detach_dmg EXIT
+APP="$MOUNT/VNote.app"
+[[ -d "$APP/Contents" ]] || { echo 'DMG 안에서 VNote.app을 찾을 수 없습니다' >&2; exit 1; }
 ENGINE="$APP/Contents/Resources/vnote-engine/vnote-engine"
 export VNOTE_DATA_DIR="$ROOT/out/dist-test/opus-packaged"
 export HF_HOME="$VNOTE_DATA_DIR/models"
