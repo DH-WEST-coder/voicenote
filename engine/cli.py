@@ -322,7 +322,8 @@ def main():
     t.add_argument("--asr-model", default=default_asr_model())
     t.add_argument("--diarizer-bin", default=os.environ.get("VNOTE_FLUID_BIN", str(FLUID)))
     lv = sub.add_parser("live", help="실시간 받아쓰기: stdin 16kHz 모노 float32 PCM → JSON 줄")
-    lv.add_argument("--model", default=LIVE_MODEL)
+    from engine.core import default_live_model
+    lv.add_argument("--model", default=default_live_model())
     lv.add_argument("--chunk-sec", type=float, default=2.0)
     lv.add_argument("--terms-file")
     lv.add_argument("--language")
@@ -336,7 +337,11 @@ def main():
     status = ms.add_parser("status")
     status.add_argument("--json", action="store_true")
     download = ms.add_parser("download")
-    download.add_argument("--set", choices=["full", "lite"], required=True)
+    group = download.add_mutually_exclusive_group(required=True)
+    group.add_argument("--set", choices=["full", "lite"])
+    group.add_argument("--models", help="받을 모델 ID를 쉼표로 구분")
+    download.add_argument("--asr-model", help="저장할 일괄 모델 ID")
+    download.add_argument("--live-model", help="저장할 실시간 모델 ID")
     download.add_argument("--json", action="store_true")
     args = ap.parse_args()
     if args.cmd == "selftest-imports":

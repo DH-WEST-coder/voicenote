@@ -33,7 +33,8 @@ export interface Recording {
 export interface Settings {
     onboardingDone: boolean;
     liveEnabled: boolean;
-    modelSet: string;
+    asrModel: string;
+    liveModel: string;
     theme: string;
     chatModel: string;
     updateChecked: string;

@@ -71,7 +71,8 @@ def fluid_complete():
 
 def status():
     _, size = folder_status(fluid_root())
-    return {"stage": "models", "status": "status", "models": [model_status(m) for m in (ASR_MODEL, LIVE_MODEL, ALIGNER)] +
+    precision = "moona3k/mlx-qwen3-asr-1.7b-8bit"
+    return {"stage": "models", "status": "status", "models": [model_status(m) for m in dict.fromkeys((precision, LIVE_MODEL, ALIGNER))] +
             [{"id": "FluidAudio", "downloaded": fluid_complete(), "size_bytes": size}]}
 
 
@@ -79,6 +80,11 @@ def save_model(model):
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
     data["asr_model"] = model
+    save_config(data)
+
+
+def save_config(data):
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=CONFIG.parent, delete=False) as f:
         json.dump(data, f, ensure_ascii=False)
         f.flush()
@@ -145,16 +151,44 @@ def run_models(args):
                 emit("download", model=current[0], downloaded=self.n, total=self.total,
                      progress=min(1, self.n / self.total) if self.total else 0)
                 return result
-        chosen = ASR_MODEL if args.set == "full" else LIVE_MODEL
+        legacy = getattr(args, "set", None)
+        model_arg = getattr(args, "models", None)
+        selected = [m.strip() for m in model_arg.split(",") if m.strip()] if model_arg else []
+        if legacy:
+            chosen = ASR_MODEL if legacy == "full" else LIVE_MODEL
+            selected = [chosen, LIVE_MODEL]
+        if not selected:
+            raise ValueError("받을 모델 ID가 없습니다")
+        allowed = {ASR_MODEL, LIVE_MODEL, "moona3k/mlx-qwen3-asr-0.6b-4bit"}
+        if any(m not in allowed for m in selected):
+            raise ValueError("지원하지 않는 ASR 모델입니다")
+        data = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+        chosen = data.get("asr_model", ASR_MODEL)
+        live = data.get("live_model", LIVE_MODEL)
+        for model in selected:
+            if model == LIVE_MODEL:
+                live = model
+            else:
+                chosen = model
+        if legacy == "lite":
+            chosen = LIVE_MODEL
+        if getattr(args, "asr_model", None):
+            chosen = args.asr_model
+        if getattr(args, "live_model", None):
+            live = args.live_model
+        if chosen not in allowed or live not in allowed:
+            raise ValueError("저장할 모델 ID가 올바르지 않습니다")
         current = [""]
-        for model in dict.fromkeys([chosen, LIVE_MODEL, ALIGNER]):
+        for model in dict.fromkeys([*selected, ALIGNER]):
             current[0] = model
             emit("download", model=model, progress=0)
             snapshot_download(model, cache_dir=cache_root(), tqdm_class=Progress)
             emit("download", model=model, progress=1)
         warm_fluid(emit)
-        save_model(chosen)
-        emit("done", model_set=args.set, asr_model=chosen)
+        data["asr_model"] = chosen
+        data["live_model"] = live
+        save_config(data)
+        emit("done", models=selected, asr_model=chosen, live_model=live, model_set=legacy or "custom")
         return 0
     except Exception as e:
         emit("error", message=str(e))

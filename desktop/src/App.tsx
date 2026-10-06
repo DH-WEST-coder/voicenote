@@ -156,8 +156,9 @@ function App() {
             progress?: number;
             message?: string;
             model_set?: string;
+            models?: string[];
         }>('model-progress',({ payload: p }) => {
-            setModelProgress({ busy: !['done','error'].includes(p.status),done: p.status==='done',modelSet: p.model_set||'',text: p.status==='done'? ko.modelDone:p.status==='error'? p.message||ko.retryDownload:`${p.model||''} ${Math.round((p.progress||0)*100)}%` }); if(p.status==='done') void refresh(); if(p.status==='error')
+            setModelProgress({ busy: !['done','error'].includes(p.status),done: p.status==='done',modelSet: (p.models||[]).join(','),text: p.status==='done'? ko.modelDone:p.status==='error'? p.message||ko.retryDownload:`${p.model||''} ${Math.round((p.progress||0)*100)}%` }); if(p.status==='done') void refresh(); if(p.status==='error')
                 fail(p.message||ko.retryDownload);
         }));
         void register(listen<{
@@ -352,7 +353,7 @@ function App() {
         }
     }
     function insert(text: string) { const detail=latest.current.details[selected]||blank; const t=clock(); setText(selected,detail.text+(detail.text&&!detail.text.endsWith('\n')? '\n':'')+(t!==null? `[${time(t)}] `:'')+text.trim()+'\n'); }
-    function download(modelSet: string) { setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet }); invoke('download_models',{ modelSet }).catch(e => { setModelProgress({ busy: false,done: false,text: String(e),modelSet }); fail(e); }); }
+    function download(modelId: string,modelType: string) { setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet: modelId }); invoke('download_models',{ modelId,modelType }).catch(e => { setModelProgress({ busy: false,done: false,text: String(e),modelSet: modelId }); fail(e); }); }
     const note=data?.notes.find(n => n.id===selected);
     const detail=details[selected]||blank;
     const materials=note?.materials||[];

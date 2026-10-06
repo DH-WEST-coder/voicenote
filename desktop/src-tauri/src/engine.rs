@@ -342,12 +342,13 @@ pub fn start_live(
     note: &str,
 ) -> Result<mpsc::Sender<Vec<f32>>, String> {
     let (file, lang) = terms(s, note, &format!("{id}-live"))?;
+    let model = s.data.lock().map_err(err)?.settings.live_model.clone();
     // 파일을 먼저 만들므로 note_detail이 존재하지 않는 live 경로를 읽지 않는다.
     let path = s.root.join("live").join(format!("{id}.jsonl"));
     let mut output_file = std::fs::File::create(path).map_err(err)?;
     let result = (|| {
         let mut child = command(app, s)?
-            .args(["live", "--terms-file", &file, "--language", &lang])
+            .args(["live", "--model", &model, "--terms-file", &file, "--language", &lang])
             .stdin(Stdio::piped())
             .spawn()
             .map_err(err)?;

@@ -10,12 +10,12 @@ from engine import models
 def test_distribution_isolation(work_dir):
     script = '''from engine.core import *
 import json
-print(json.dumps([str(CONFIG), str(DEFAULT_OUT), load_profiles(), load_config(), default_asr_model(), resolve_wiki_dir("/wiki", "/vault")]))'''
-    (work_dir / 'config.json').write_text(json.dumps({'vault': '/private', 'asr_model': models.LIVE_MODEL}))
+print(json.dumps([str(CONFIG), str(DEFAULT_OUT), load_profiles(), load_config(), default_asr_model(), default_live_model(), resolve_wiki_dir("/wiki", "/vault")]))'''
+    (work_dir / 'config.json').write_text(json.dumps({'vault': '/private', 'asr_model': models.LIVE_MODEL, 'live_model': models.ASR_MODEL}))
     result = subprocess.run([__import__('sys').executable, '-c', script], env={**os.environ, 'VNOTE_DATA_DIR': str(work_dir)}, capture_output=True, text=True)
     assert result.returncode == 0
     data = json.loads(result.stdout)
-    assert data == [str(work_dir / 'config.json'), str(work_dir / 'transcripts'), {}, {'vault': '', 'semester': ''}, models.LIVE_MODEL, None]
+    assert data == [str(work_dir / 'config.json'), str(work_dir / 'transcripts'), {}, {'vault': '', 'semester': ''}, models.LIVE_MODEL, models.ASR_MODEL, None]
 
 
 def test_status_without_loading_models(work_dir, monkeypatch):
@@ -40,8 +40,23 @@ def test_download_lite_and_preserve_config(work_dir, monkeypatch, capsys):
     monkeypatch.setattr(models, 'warm_fluid', lambda emit: called.append('fluid'))
     assert models.run_models(SimpleNamespace(model_action='download', set='lite', json=True)) == 0
     assert called == [models.LIVE_MODEL, models.ALIGNER, 'fluid']
-    assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': models.LIVE_MODEL}
+    assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': models.LIVE_MODEL, 'live_model': models.LIVE_MODEL}
     assert json.loads(capsys.readouterr().out.splitlines()[-1])['status'] == 'done'
+
+
+def test_download_selected_models_only(work_dir, monkeypatch, capsys):
+    monkeypatch.setenv('HF_HOME', str(work_dir))
+    monkeypatch.setenv('VNOTE_DATA_DIR', str(work_dir))
+    monkeypatch.setattr(models, 'CONFIG', work_dir / 'config.json')
+    models.CONFIG.write_text('{}')
+    called = []
+    monkeypatch.setattr('huggingface_hub.snapshot_download', lambda repo, **kw: called.append(repo))
+    monkeypatch.setattr(models, 'warm_fluid', lambda emit: called.append('fluid'))
+    selected = models.ASR_MODEL
+    assert models.run_models(SimpleNamespace(model_action='download', models=selected, set=None, json=True)) == 0
+    assert called == [selected, models.ALIGNER, 'fluid']
+    assert json.loads(models.CONFIG.read_text()) == {'asr_model': selected, 'live_model': models.LIVE_MODEL}
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])['models'] == [selected]
 
 
 def test_download_failure_keeps_selected_model(work_dir, monkeypatch, capsys):
@@ -150,7 +165,7 @@ def test_download_saves_after_no_speech(work_dir, monkeypatch, capfd, model_set,
     models.CONFIG.write_text('{"other": 1}')
     monkeypatch.setattr('huggingface_hub.snapshot_download', lambda *a, **kw: None)
     assert models.run_models(SimpleNamespace(model_action='download', set=model_set, json=True)) == 0
-    assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': chosen}
+    assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': chosen, 'live_model': models.LIVE_MODEL}
     assert json.loads(capfd.readouterr().out.splitlines()[-1])['status'] == 'done'
 
 

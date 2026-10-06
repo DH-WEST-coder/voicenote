@@ -215,16 +215,19 @@ commit/partial 시간과 통계를 계산한다. MLX 객체는 맥 백엔드 밖
 `VNOTE_DATA_DIR`가 있으면 config/profiles는 그 폴더, 기본 출력은 그 아래
 `transcripts/`를 사용한다. 기본 프로필은 `{}`, 위키는 항상 꺼진다.
 개인용(환경 변수 없음) 경로·기본 프로필·JSONL·Markdown 계약은 그대로다.
-배포판 transcribe의 `--asr-model` 생략값은 config.json의 `asr_model`이며,
-설정이 없으면 기존 1.7B 모델이다. 명시한 인자는 항상 우선한다.
+배포판 transcribe의 `--asr-model` 생략값은 config.json의 `asr_model`,
+live의 `--model` 생략값은 `live_model`이다. 설정이 없으면 각각 1.7B 8bit와
+0.6B 4bit를 쓴다. 명시한 인자는 항상 우선한다.
 
 - `models status --json`: `{stage:"models",status:"status",models:[{id,downloaded,size_bytes}]}`.
-  ASR 1.7B 8bit, live 0.6B 4bit, Qwen/Qwen3-ForcedAligner-0.6B, FluidAudio를 점검한다.
-- `models download --set full|lite --json`: JSONL
+  ASR 1.7B 8bit/0.6B 4bit, Qwen/Qwen3-ForcedAligner-0.6B, FluidAudio를 모델별로 점검한다.
+- `models download --models <id,...> --json`: 선택한 ASR 모델만 받고 aligner와 FluidAudio를 공통 준비한다.
+  `--asr-model`과 `--live-model`은 선택값을 config에 저장한다.
+  `--set full|lite --json`은 호환 인자로 남긴다. JSONL
   `{stage:"models",status:"download",model,progress,downloaded?,total?}`.
   HF 캐시를 재사용해 이어받는다. full은 1.7B+0.6B+aligner, lite는 0.6B+aligner.
   FluidAudio는 3초 무음으로 준비한다. 모든 준비가 성공한 뒤 config의 asr_model을 원자 저장한다.
-  완료 `{stage:"models",status:"done",model_set,asr_model}`; 실패
+  완료 `{stage:"models",status:"done",models,asr_model,live_model}`; 실패
   `{stage:"models",status:"error",message}`와 종료 코드 1. status 성공은 0.
 - HF 캐시는 `HF_HOME/hub` 또는 `VNOTE_DATA_DIR/models/hub`.
   모델 관리에 두 환경 변수가 모두 없으면 오류. 모델을 로드하지 않고 캐시만 점검한다.

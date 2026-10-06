@@ -52,7 +52,8 @@ pub struct Recording {
 pub struct Settings {
     pub onboarding_done: bool,
     pub live_enabled: bool,
-    pub model_set: String,
+    pub asr_model: String,
+    pub live_model: String,
     pub theme: String,
     pub chat_model: String,
     pub update_checked: String,
@@ -62,7 +63,8 @@ impl Default for Settings {
         Self {
             onboarding_done: false,
             live_enabled: true,
-            model_set: "full".into(),
+            asr_model: "moona3k/mlx-qwen3-asr-1.7b-8bit".into(),
+            live_model: "moona3k/mlx-qwen3-asr-0.6b-4bit".into(),
             theme: "system".into(),
             chat_model: String::new(),
             update_checked: String::new(),
@@ -291,6 +293,8 @@ mod boundary_tests {
         assert_eq!(d.recordings[0].status, "failed");
         assert!(d.recordings[0].error.is_some());
         assert!(!d.settings.live_enabled);
+        assert_eq!(d.settings.asr_model, "moona3k/mlx-qwen3-asr-1.7b-8bit");
+        assert_eq!(d.settings.live_model, "moona3k/mlx-qwen3-asr-0.6b-4bit");
         assert!(next
             .owned(root.join("../outside").to_str().unwrap())
             .is_err());
@@ -314,6 +318,23 @@ mod boundary_tests {
         assert!(s
             .owned(s.root.join("audio/link.wav").to_str().unwrap())
             .is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn model_choices_persist() {
+        let root = root();
+        let s = Storage::open(root.clone()).unwrap();
+        let mut d = s.data.lock().unwrap();
+        d.settings.asr_model = "moona3k/mlx-qwen3-asr-0.6b-4bit".into();
+        d.settings.live_model = "moona3k/mlx-qwen3-asr-1.7b-8bit".into();
+        s.save(&d).unwrap();
+        drop(d);
+        let loaded = Storage::open(root.clone()).unwrap();
+        let d = loaded.data.lock().unwrap();
+        assert_eq!(d.settings.asr_model, "moona3k/mlx-qwen3-asr-0.6b-4bit");
+        assert_eq!(d.settings.live_model, "moona3k/mlx-qwen3-asr-1.7b-8bit");
+        drop(d);
         fs::remove_dir_all(root).unwrap();
     }
 }
