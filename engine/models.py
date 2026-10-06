@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import wave
 from pathlib import Path
 from engine.core import ASR_MODEL, LIVE_MODEL, FLUID, CONFIG
@@ -21,7 +22,10 @@ def cache_root():
 
 def fluid_root():
     # FluidAudio의 DownloadUtils 기본 Application Support 캐시.
-    return Path.home() / "Library/Application Support/FluidAudio/Models"
+    root = os.environ.get("VNOTE_DATA_DIR")
+    if not root:
+        raise RuntimeError("FluidAudio 점검에는 VNOTE_DATA_DIR이 필요합니다")
+    return Path(root).expanduser() / "models/fluid-home/Library/Application Support/FluidAudio/Models"
 
 
 def folder_status(path):
@@ -29,20 +33,39 @@ def folder_status(path):
     return bool(files), sum(p.stat().st_size for p in files)
 
 
+def snapshot_complete(snapshot):
+    if not (snapshot / "config.json").is_file() or not (snapshot / "tokenizer.json").is_file():
+        return False
+    files = list(snapshot.rglob("*"))
+    if any(p.is_symlink() and not p.exists() for p in files):
+        return False
+    weights = [p for p in files if p.suffix in (".safetensors", ".bin") and p.is_file()]
+    if not weights or any(p.stat().st_size == 0 for p in weights):
+        return False
+    for index in snapshot.glob("*.index.json"):
+        try:
+            shards = set(json.loads(index.read_text())["weight_map"].values())
+            if not shards or not all((snapshot / name).is_file() for name in shards):
+                return False
+        except (ValueError, KeyError, TypeError):
+            return False
+    return True
+
+
 def model_status(model):
     path = cache_root() / ("models--" + model.replace("/", "--"))
     snapshots = path / "snapshots"
-    # 스냅샷 필수 config와 가중치 및 깨진 symlink 확인.
-    complete = any((s / "config.json").is_file() and
-                   any(p.suffix in (".safetensors", ".bin") for p in s.rglob("*") if p.is_file()) and
-                   all(p.exists() for p in s.rglob("*") if p.is_symlink())
-                   for s in snapshots.iterdir()) if snapshots.exists() else False
+    complete = any(snapshot_complete(s) for s in snapshots.iterdir()) if snapshots.exists() else False
     _, size = folder_status(path / "blobs")
     return {"id": model, "downloaded": complete, "size_bytes": size}
 
 
 def status():
-    ready, size = folder_status(fluid_root())
+    root = fluid_root()
+    _, size = folder_status(root)
+    required = ("Segmentation.mlmodelc", "Embedding.mlmodelc", "FBank.mlmodelc", "PldaRho.mlmodelc", "plda-parameters.json")
+    # ModelHub는 저장소 하위 폴더를 붙일 수 있다. 같은 폴더의 전체 필수 파일을 확인한다.
+    ready = any(all((p.parent / name).exists() for name in required) for p in root.rglob("plda-parameters.json")) if root.exists() else False
     return {"stage": "models", "status": "status", "models": [model_status(m) for m in (ASR_MODEL, LIVE_MODEL, ALIGNER)] +
             [{"id": "FluidAudio", "downloaded": ready, "size_bytes": size}]}
 
@@ -56,7 +79,24 @@ def save_model(model):
         f.flush()
         os.fsync(f.fileno())
         tmp = Path(f.name)
-    tmp.replace(CONFIG)
+    try:
+        tmp.replace(CONFIG)
+        fd = os.open(CONFIG.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def fluid_env():
+    root = os.environ.get("VNOTE_DATA_DIR")
+    if not root:
+        return None
+    home = Path(root).expanduser() / "models/fluid-home"
+    home.mkdir(parents=True, exist_ok=True)
+    return {**os.environ, "CFFIXED_USER_HOME": str(home.resolve())}
 
 
 def warm_fluid(emit):
@@ -72,7 +112,7 @@ def warm_fluid(emit):
             f.writeframes(bytes(16000 * 2 * 3))
         emit("download", model="FluidAudio", progress=0)
         result = subprocess.run([str(binary), "process", str(wav), "--mode", "offline", "--output", str(Path(tmp) / "out.json")],
-                                stdout=sys.stderr, stderr=sys.stderr, timeout=900)
+                                stdout=sys.stderr, stderr=sys.stderr, timeout=900, env=fluid_env())
         if result.returncode:
             raise RuntimeError(f"FluidAudio 모델 준비 실패: {result.returncode}")
         emit("download", model="FluidAudio", progress=1)
@@ -80,16 +120,18 @@ def warm_fluid(emit):
 
 def run_models(args):
     wire = sys.stdout
+    lock = threading.Lock()
     def emit(kind, **kw):
         obj = {"stage": "models", "status": kind, **kw}
-        print(json.dumps(obj, ensure_ascii=False) if args.json else str(obj), file=wire, flush=True)
+        with lock:
+            print(json.dumps(obj, ensure_ascii=False) if args.json else str(obj), file=wire, flush=True)
     try:
         if args.model_action == "status":
             obj = status()
             print(json.dumps(obj, ensure_ascii=False) if args.json else str(obj), file=wire, flush=True)
             return 0
         from huggingface_hub import snapshot_download
-        from tqdm.auto import tqdm
+        from huggingface_hub.utils import tqdm
         class Progress(tqdm):
             def update(self, n=1):
                 result = super().update(n)

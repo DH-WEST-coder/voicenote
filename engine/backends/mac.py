@@ -66,7 +66,8 @@ class MacBackend(Backend):
             if speakers:
                 cmd += ["--num-speakers", str(speakers)]
             with log_path.open("w") as log:
-                p = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+                from engine.models import fluid_env
+                p = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=fluid_env())
             if p.returncode != 0 or not out_json.exists():
                 tail = log_path.read_text()[-500:]
                 raise RuntimeError(f"화자 분리 실패(코드 {p.returncode}): {tail}")
