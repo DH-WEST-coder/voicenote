@@ -17,6 +17,7 @@ VNote는 수업·회의를 녹음하고 한국어·영어 대본을 만드는 �
 1. 릴리스의 `VNote_0.1.1_aarch64.dmg`를 내려받아 엽니다.
 2. VNote를 **Applications(응용 프로그램)** 폴더로 끌어 넣습니다.
 3. 응용 프로그램 폴더의 VNote를 엽니다.
+   처음 열 때 앱이 한 번 자동으로 다시 시작될 수 있습니다.
 4. 개발자 확인 때문에 차단되면 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**를 선택하고 다시 엽니다. 이 배포판은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다.
 5. 첫 실행 안내에서 마이크를 허용하고 정밀(full) 또는 경량(lite) 모델을 받습니다. 다운로드가 완료되어야 다음 단계로 넘어갑니다.
 6. ChatGPT 연결은 건너뛰어도 됩니다. 프로젝트와 노트를 만든 뒤 녹음하거나 기존 오디오·PDF를 가져오세요.
@@ -60,6 +61,6 @@ Qwen3-ASR·ForcedAligner(Apache-2.0), MLX(MIT), mlx-qwen3-asr(Apache-2.0), Fluid
 
 ## Current Work
 
-- **NOW**: 0.1.1 다운로드 바이트 진행률·quarantine 엔진 복구 구현. pytest 44개·Rust 20개·프런트 빌드 통과.
+- **NOW**: App Translocation 원본 경로의 quarantine 제거·1회 재시작 복구와 실패 안내 완료. Rust 25개, pytest 49개, 프런트 빌드 통과.
 - **NEXT**: hdiutil attach 장치 제한과 Opus 실제 네트워크 다운로드·GUI 확인 후 배포.
-- **DONE**: 모델 다운로드 바이트 진행률, 엔진 재시도·앱 위치 안내, 문제 해결 문서.
+- **DONE**: 모델 다운로드 바이트 진행률, 일반 실행 시 엔진·사이드카 quarantine 제거와 SIGKILL 재시도, 앱 위치 안내.

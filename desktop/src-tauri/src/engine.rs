@@ -21,6 +21,110 @@ pub struct Engine {
 }
 pub const TRANSLOCATION_MESSAGE: &str = "VNote를 응용 프로그램 폴더로 옮긴 뒤 다시 열어 주세요";
 pub const QUARANTINE_ENGINE_MESSAGE: &str = "macOS가 엔진 실행을 막았습니다. 시스템 설정 → 개인정보 보호 및 보안에서 허용하거나, 앱을 응용 프로그램 폴더로 옮긴 뒤 다시 실행하세요.";
+pub const QUARANTINE_COMMAND: &str = "xattr -dr com.apple.quarantine /Applications/VNote.app";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppLocation {
+    Translocated,
+    Volume,
+    Normal,
+}
+
+pub fn classify_app_path(path: &std::path::Path) -> AppLocation {
+    if is_translocated_path(path) {
+        AppLocation::Translocated
+    } else if path.starts_with("/Volumes") {
+        AppLocation::Volume
+    } else {
+        AppLocation::Normal
+    }
+}
+
+pub fn should_relaunch(original: &std::path::Path, relaunched: bool, writable: bool) -> bool {
+    !relaunched
+        && writable
+        && original.extension().is_some_and(|ext| ext == "app")
+        && classify_app_path(original) == AppLocation::Normal
+}
+
+#[cfg(target_os = "macos")]
+mod translocation {
+    use std::{ffi::{c_char, c_void, CString}, os::unix::ffi::OsStrExt, path::{Path, PathBuf}, ptr};
+
+    type CFUrl = *const c_void;
+    type IsTranslocated = unsafe extern "C" fn(CFUrl, *mut u8, *mut *const c_void) -> u8;
+    type CreateOriginal = unsafe extern "C" fn(CFUrl, *mut *const c_void) -> CFUrl;
+    type CreateUrl = unsafe extern "C" fn(*const c_void, *const u8, isize, u8) -> CFUrl;
+    type GetPath = unsafe extern "C" fn(CFUrl, u8, *mut u8, isize) -> u8;
+    type Release = unsafe extern "C" fn(*const c_void);
+
+    #[link(name = "System")]
+    unsafe extern "C" {
+        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn access(path: *const c_char, mode: i32) -> i32;
+    }
+
+    unsafe fn symbol<T: Copy>(handle: *mut c_void, name: &str) -> Option<T> {
+        let name = CString::new(name).ok()?;
+        let ptr = dlsym(handle, name.as_ptr());
+        if ptr.is_null() { None } else { Some(std::mem::transmute_copy(&ptr)) }
+    }
+
+    pub fn original_path(bundle: &Path) -> Option<PathBuf> {
+        unsafe {
+            let security = dlopen(b"/System/Library/Frameworks/Security.framework/Security\0".as_ptr().cast(), 1);
+            let cf = dlopen(b"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation\0".as_ptr().cast(), 1);
+            if security.is_null() || cf.is_null() { return None; }
+            let is_translocated: IsTranslocated = symbol(security, "SecTranslocateIsTranslocatedURL")?;
+            let create_original: CreateOriginal = symbol(security, "SecTranslocateCreateOriginalPathForURL")?;
+            let create_url: CreateUrl = symbol(cf, "CFURLCreateFromFileSystemRepresentation")?;
+            let get_path: GetPath = symbol(cf, "CFURLGetFileSystemRepresentation")?;
+            let release: Release = symbol(cf, "CFRelease")?;
+            let bytes = bundle.as_os_str().as_bytes();
+            let url = create_url(ptr::null(), bytes.as_ptr(), bytes.len() as isize, 1);
+            if url.is_null() { return None; }
+            let mut translocated = 0u8;
+            if is_translocated(url, &mut translocated, ptr::null_mut()) == 0 || translocated == 0 {
+                release(url);
+                return None;
+            }
+            let original = create_original(url, ptr::null_mut());
+            release(url);
+            if original.is_null() { return None; }
+            let mut buffer = vec![0u8; 4096];
+            let ok = get_path(original, 1, buffer.as_mut_ptr(), buffer.len() as isize);
+            release(original);
+            if ok == 0 { return None; }
+            let len = buffer.iter().position(|b| *b == 0)?;
+            Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buffer[..len])))
+        }
+    }
+
+    pub fn writable(path: &Path) -> bool {
+        let Ok(path) = CString::new(path.as_os_str().as_bytes()) else { return false; };
+        unsafe { access(path.as_ptr(), 2) == 0 }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn repair_translocated_launch() -> bool {
+    use std::process;
+    if std::env::var_os("VNOTE_RELAUNCHED").is_some() { return false; }
+    let current = match std::env::current_exe().ok().and_then(|p| bundle_path(&p)) { Some(p) => p, None => return false };
+    if classify_app_path(&current) != AppLocation::Translocated { return false; }
+    let Some(original) = translocation::original_path(&current) else { return false; };
+    if !original.is_dir() { return false; }
+    if !should_relaunch(&original, false, translocation::writable(&original)) { return false; }
+    let removed = Command::new("/usr/bin/xattr").args(["-dr", "com.apple.quarantine"]).arg(&original).status().is_ok_and(|s| s.success());
+    if !removed { return false; }
+    let opened = Command::new("/usr/bin/open").args(["-n", "--env", "VNOTE_RELAUNCHED=1"]).arg(&original).status().is_ok_and(|s| s.success());
+    if opened { process::exit(0); }
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn repair_translocated_launch() -> bool { false }
 
 pub fn bundle_path(exe: &std::path::Path) -> Option<std::path::PathBuf> {
     exe.parent()?
@@ -81,9 +185,6 @@ pub fn signaled(exit: &std::process::ExitStatus) -> bool {
     }
 }
 pub fn spawn_with_retry(app: &AppHandle, mut cmd: Command) -> Result<Child, String> {
-    if is_app_translocated() {
-        return Err(TRANSLOCATION_MESSAGE.into());
-    }
     for attempt in 0..2 {
         let mut child = cmd.spawn().map_err(err)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -170,9 +271,6 @@ pub fn binary(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String>
         .ok_or("엔진이 설치되지 않았습니다".into())
 }
 pub fn command(app: &AppHandle, s: &Storage) -> Result<Command, String> {
-    if is_app_translocated() {
-        return Err(TRANSLOCATION_MESSAGE.into());
-    }
     let override_cmd = std::env::var("VNOTE_ENGINE_CMD").ok();
     let mut cmd = if let Some(v) = override_cmd {
         let parts = split_command(&v)?;
@@ -544,6 +642,22 @@ mod tests {
         assert!(!is_translocated_path(std::path::Path::new(
             "/Applications/VNote.app"
         )));
+    }
+    #[test]
+    fn classifies_app_locations() {
+        assert_eq!(classify_app_path(std::path::Path::new("/private/var/folders/x/AppTranslocation/d/VNote.app")), AppLocation::Translocated);
+        assert_eq!(classify_app_path(std::path::Path::new("/Volumes/VNote/VNote.app")), AppLocation::Volume);
+        assert_eq!(classify_app_path(std::path::Path::new("/Applications/VNote.app")), AppLocation::Normal);
+    }
+    #[test]
+    fn relaunch_is_limited_to_once_and_skips_dmg_paths() {
+        let app = std::path::Path::new("/Applications/VNote.app");
+        let dmg_app = std::path::Path::new("/Volumes/VNote/VNote.app");
+        assert!(should_relaunch(app, false, true));
+        assert!(!should_relaunch(app, true, true));
+        assert!(!should_relaunch(app, false, false));
+        assert!(!should_relaunch(dmg_app, false, true));
+        assert!(!should_relaunch(std::path::Path::new("/Applications/VNote"), false, true));
     }
     #[test]
     fn classifies_signal_exit() {

@@ -28,7 +28,7 @@ fn log_error(app: AppHandle) -> Result<(), String> {
 }
 #[tauri::command]
 fn startup_status() -> Value {
-    json!({"translocated": engine::is_app_translocated(), "message": engine::TRANSLOCATION_MESSAGE})
+    json!({"translocated": engine::is_app_translocated(), "message": engine::TRANSLOCATION_MESSAGE, "command": engine::QUARANTINE_COMMAND})
 }
 #[tauri::command]
 fn load_data(app: AppHandle) -> Result<Data, String> {
@@ -567,6 +567,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            engine::repair_translocated_launch();
             let quarantine_cleanup_failed = engine::clear_bundle_quarantine();
             let root = if cfg!(debug_assertions) {
                 std::env::var_os("VNOTE_DATA_DIR")

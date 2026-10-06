@@ -46,6 +46,8 @@ function App() {
     }|null>(null);
     const [modelProgress,setModelProgress]=useState<{ busy: boolean; done: boolean; text: string; modelSet: string; status?: string; model?: string; downloadedBytes?: number; totalBytes?: number; bytesPerSec?: number; progress?: number; lastByteAt?: number; error?: boolean }>({ busy: false,done: false,text: '',modelSet: '' });
     const [translocated,setTranslocated]=useState(false);
+    const [translocationCommand,setTranslocationCommand]=useState('xattr -dr com.apple.quarantine /Applications/VNote.app');
+    const [commandCopied,setCommandCopied]=useState(false);
     const pendingTerms=useRef(new Set<string>());
     const [update,setUpdate]=useState<{
         html_url: string;
@@ -97,7 +99,7 @@ function App() {
     },[]);
     useEffect(() => {
         void refresh();
-        invoke<{translocated:boolean}>('startup_status').then(s => setTranslocated(s.translocated)).catch(() => { });
+        invoke<{translocated:boolean;command:string}>('startup_status').then(s => { setTranslocated(s.translocated); setTranslocationCommand(s.command); }).catch(() => { });
         invoke<boolean>('chat_status').then(setConnected).catch(() => { });
         invoke<{
             html_url: string;
@@ -380,7 +382,7 @@ function App() {
     const materials=note?.materials||[];
     const material=materials.find(m => m.id===materialId)||materials[0];
     const lines=note? combinedLines(note,detail):[];
-    if(translocated) return <div className="overlay"><section className="modal"><h1>VNote를 응용 프로그램 폴더로 옮긴 뒤 다시 열어 주세요</h1></section></div>;
+    if(translocated) return <div className="overlay"><section className="modal"><h1>VNote를 응용 프로그램 폴더로 끌어다 놓은 뒤 다시 열어 주세요</h1><p>또는 터미널에서 아래 명령을 실행한 뒤 다시 여세요.</p><code style={{ display:'block',wordBreak:'break-all',margin:'16px 0' }}>{translocationCommand}</code><button onClick={async () => { try { await navigator.clipboard.writeText(translocationCommand); } catch { const field=document.createElement('textarea'); field.value=translocationCommand; document.body.appendChild(field); field.select(); document.execCommand('copy'); field.remove(); } setCommandCopied(true); }}>{commandCopied?'복사됨':'명령 복사'}</button></section></div>;
     return <>
         <header>
             <b>
