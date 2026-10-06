@@ -1,6 +1,7 @@
 # 엔진(voicenote.py)
 mlx-qwen3-asr[aligner]==0.4.4
 soundfile==0.14.0
+platformdirs==4.12.3
 # 벤치마크 비교용(bench_whisper.py, diarize.py) — 엔진에는 필요 없음
 mlx-whisper==0.4.3
 sherpa-onnx==1.13.8
