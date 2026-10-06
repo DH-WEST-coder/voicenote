@@ -10,6 +10,13 @@ import wave
 from pathlib import Path
 from engine.core import ASR_MODEL, LIVE_MODEL, FLUID, CONFIG
 
+# huggingface_hub reads this when imported. Disable the memory-buffered XET
+# transport by default so incomplete blob sizes reflect network progress.
+if os.environ.get("VNOTE_ENABLE_XET") == "1":
+    os.environ.pop("HF_HUB_DISABLE_XET", None)
+else:
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 ALIGNER = "Qwen/Qwen3-ForcedAligner-0.6B"
 
 

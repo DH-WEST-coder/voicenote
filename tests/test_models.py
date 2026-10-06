@@ -175,6 +175,8 @@ def test_download_progress_counts_incomplete_blobs_and_xet(work_dir, monkeypatch
     from types import SimpleNamespace
     monkeypatch.setenv('HF_HOME', str(work_dir / 'hf'))
     monkeypatch.setenv('HF_XET_CACHE', str(work_dir / 'xet'))
+    monkeypatch.delenv('VNOTE_ENABLE_XET', raising=False)
+    monkeypatch.setenv('HF_HUB_DISABLE_XET', '1')
     monkeypatch.setenv('TMPDIR', str(work_dir / 'tmp'))
     monkeypatch.setattr(models, 'CONFIG', work_dir / 'config.json')
     existing = models.cache_root() / ('models--' + models.LIVE_MODEL.replace('/', '--')) / 'blobs' / 'cached-weight'
@@ -183,10 +185,17 @@ def test_download_progress_counts_incomplete_blobs_and_xet(work_dir, monkeypatch
     monkeypatch.setattr(models, 'warm_fluid', lambda emit, *args: None)
     monkeypatch.setattr(models, 'save_model', lambda model: None)
     monkeypatch.setattr('huggingface_hub.HfApi', lambda: SimpleNamespace(model_info=lambda repo, **kw: SimpleNamespace(siblings=[SimpleNamespace(size=32)])))
+    resume_prefixes = []
     def fake_download(repo, **kwargs):
         assert kwargs['cache_dir'] == models.cache_root()
         incomplete = models.cache_root() / ('models--' + repo.replace('/', '--')) / 'blobs' / 'weight.incomplete'
         incomplete.parent.mkdir(parents=True, exist_ok=True)
+        # Simulate a previously interrupted HTTP transfer: preserve its bytes
+        # and append to the same .incomplete blob on resume.
+        incomplete.write_bytes(b'partial')
+        resume_prefixes.append(incomplete.read_bytes())
+        with incomplete.open('ab') as f:
+            f.write(b'12345678')
         for _ in range(4):
             with incomplete.open('ab') as f:
                 f.write(b'12345678')
@@ -197,6 +206,8 @@ def test_download_progress_counts_incomplete_blobs_and_xet(work_dir, monkeypatch
         incomplete.rename(incomplete.with_suffix(''))
     monkeypatch.setattr('huggingface_hub.snapshot_download', fake_download)
     assert models.run_models(SimpleNamespace(model_action='download', set='lite', json=True)) == 0
+    assert os.environ['HF_HUB_DISABLE_XET'] == '1'
+    assert resume_prefixes and all(prefix == b'partial' for prefix in resume_prefixes)
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert all(row['stage'] == 'models' for row in rows)
     assert all(isinstance(row, dict) for row in rows)
@@ -206,3 +217,18 @@ def test_download_progress_counts_incomplete_blobs_and_xet(work_dir, monkeypatch
     assert updates
     assert any(row['progress'] > 0 and row['total_bytes'] == 64 for row in updates)
     assert all('bytes_per_sec' in row for row in updates)
+
+
+def test_xet_can_be_enabled_before_huggingface_import(monkeypatch):
+    import importlib
+    monkeypatch.delenv('VNOTE_ENABLE_XET', raising=False)
+    monkeypatch.setenv('HF_HUB_DISABLE_XET', '0')
+    importlib.reload(models)
+    assert os.environ['HF_HUB_DISABLE_XET'] == '1'
+    monkeypatch.setenv('VNOTE_ENABLE_XET', '1')
+    monkeypatch.setenv('HF_HUB_DISABLE_XET', '1')
+    importlib.reload(models)
+    assert 'HF_HUB_DISABLE_XET' not in os.environ
+    monkeypatch.delenv('VNOTE_ENABLE_XET')
+    monkeypatch.setenv('HF_HUB_DISABLE_XET', '1')
+    importlib.reload(models)

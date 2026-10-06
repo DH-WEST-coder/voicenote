@@ -311,20 +311,27 @@ function App() {
         else
             go();
     }
+    async function startRecording(noteId: string) {
+        const id=await invoke<string>('start_recording',{ noteId });
+        const state={ id,noteId,start: Date.now() };
+        latest.current.recording=state;
+        setRecording(state);
+        setElapsed(0);
+        return id;
+    }
+    async function stopRecording() {
+        if(testTimer.current) { clearTimeout(testTimer.current); testTimer.current=null; }
+        await invoke('stop_recording');
+        latest.current.recording=null;
+        setRecording(null);
+    }
     async function record() {
         if(!selected||recordBusy)
             return; setRecordBusy(true); try {
-                if(recording) {
-                    if(testTimer.current) { clearTimeout(testTimer.current); testTimer.current=null; }
-                    await invoke('stop_recording');
-                    setRecording(null);
-                }
-                else {
-                    const noteId=selected;
-                    const id=await invoke<string>('start_recording',{ noteId });
-                    setRecording({ id,noteId,start: Date.now() });
-                    setElapsed(0);
-                }
+                if(recording)
+                    await stopRecording();
+                else
+                    await startRecording(selected);
             }
         catch(e) {
             fail(e);
@@ -335,16 +342,16 @@ function App() {
     }
     async function testRecording() {
         if(!data||recordBusy||recording) return;
-        changeSettings({ ...data.settings,onboardingDone: true });
         setRecordBusy(true);
         try {
             await saves.current;
             const projectId=await invoke<string>('save_project',{ project: { id: '',name: ko.testProject,language: 'auto',terms: [] } });
             const noteId=await invoke<string>('save_note',{ note: { id: '',projectId,title: ko.testRecord,createdAt: '',recordingIds: [],materials: [],terms: [],speakerNames: {} } });
-            latest.current.selected=noteId; setSelected(noteId); await refresh();
-            const id=await invoke<string>('start_recording',{ noteId });
-            const state={ id,noteId,start: Date.now() }; latest.current.recording=state; setRecording(state); setElapsed(0);
-            testTimer.current=setTimeout(() => { void invoke('stop_recording').catch(fail); testTimer.current=null; },10000);
+            latest.current.selected=noteId; setSelected(noteId);
+            await refresh();
+            await startRecording(noteId);
+            changeSettings({ ...data.settings,onboardingDone: true });
+            testTimer.current=setTimeout(() => { testTimer.current=null; void stopRecording().catch(fail); },10000);
         } catch(e) { fail(e); } finally { setRecordBusy(false); }
     }
     async function exportNote(plain: boolean) {
