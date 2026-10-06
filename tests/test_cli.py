@@ -69,6 +69,30 @@ def test_batch_protocol_and_arguments(work_dir, monkeypatch):
     assert "engine: model + fluidaudio-offline" in dst.read_text()
 
 
+def test_diarize_failure_skips_and_keeps_empty_asr(work_dir, monkeypatch):
+    source = work_dir / "clip.wav"
+    source.touch()
+
+    class FailedDiarBackend(FakeBackend):
+        def transcribe(self, wav, language, terms, on_progress):
+            return Transcript("", [])
+
+        def diarize(self, wav, speakers):
+            raise RuntimeError("fluidaudiocli diagnostic")
+
+    monkeypatch.setattr(cli, "get_backend", lambda **kwargs: FailedDiarBackend())
+    monkeypatch.setattr(cli, "wav_duration", lambda wav: 14)
+    events = []
+    rep = argparse.Namespace(emit=lambda stage, **kwargs: events.append(dict(stage=stage, **kwargs)))
+    args = argparse.Namespace(audio=str(source), profile=None, terms_file=None, language=None, course=None,
+        asr_model="custom/model", diarizer_bin="/custom/bin", speakers=None, out=str(work_dir))
+    dst = cli.transcribe_file(args, rep)
+
+    assert len([e for e in events if e == {"stage": "diarize", "status": "skipped", "reason": "화자 분리 실패"}]) == 1
+    assert events[-1]["stage"] == "merge" and events[-1]["speakers"] == 0
+    assert "본문이 없습니다." in dst.read_text()
+
+
 def test_live_protocol_commit_tail_and_incomplete_pcm(monkeypatch):
     import numpy as np
     output = io.StringIO()

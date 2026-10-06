@@ -50,7 +50,7 @@ Windows 백엔드 호출은 `NotImplementedError("윈도우 엔진은 0단계 �
 |---|---|---|
 | `config` | `vault`: string, `wiki_dir`: string 또는 null | `--profile`이 있을 때만. `wiki_dir` 키가 없는 프로필은 `"-"` |
 | `convert` | `status`: `start` 또는 `done` | 변환 전/후 |
-| `diarize` | `status`: `start` 또는 `done` | 화자 분리 전/후 |
+| `diarize` | `status`: `start`, `done`, 또는 `skipped`; skipped는 `reason`: string 포함 | 화자 분리 전/후. `noSpeechDetected`는 정상적인 빈 화자 구간(`done`)이다. 그 밖의 화자 분리 오류는 ASR을 유지하고 화자1로 병합하며 `skipped`를 한 번 보낸다. |
 | `asr` | `status`: `start`, `progress`, `done` | ASR 전/진행/후 |
 | `asr` (`progress`) | `progress`: number | 라이브러리 진행률을 정수 퍼센트로 절삭. 퍼센트가 바뀔 때만 출력 |
 | `merge` | `status`: `start` | 합치기 시작 |
@@ -60,6 +60,7 @@ Windows 백엔드 호출은 `NotImplementedError("윈도우 엔진은 0단계 �
 | `error` | `message`: string | 예외 문자열. 빈 문자열이면 예외 클래스명. 뒤에 done 없음 |
 
 `progress`는 보통 0~1이며 백엔드 콜백 값을 사용한다. convert/diarize/merge는 숫자 진행률을 내지 않는다.
+ASR 본문이 비어 있으면 실패로 처리하지 않고 `본문이 없습니다.` 한 줄을 본문으로 가진 Markdown을 생성한다.
 `config?`, convert start/done 뒤 diarize와 asr가 시작된다. 두 작업의 메시지는 스레드 스케줄에 따라 섞인다.
 각 작업 안의 start/progress/done 순서는 유지된다. 둘 다 성공한 뒤 merge start, leak_removed?, merge done, 최종 done.
 오류는 실패 지점까지의 메시지 뒤에 온다. ASR 오류도 화자 분리 스레드 종료를 기다린 후 error를 낸다.
