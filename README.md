@@ -43,6 +43,6 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **NOW**: 배포판 1단계 엔진 분리 구현 완료. 모델 없는 테스트 27개 통과.
-- **NEXT**: Metal 접근 가능한 macOS 세션에서 한국어·영어·실시간 회귀 재실행. 현재 sandbox에서는 `No Metal device available`로 실패하여 대본 일치 확인 불가.
-- **DONE**: 공통/맥/윈도우 백엔드 구조, 개인 경로 제거, 모델·바이너리 인자, ENGINE_PROTOCOL.md, 실제 회귀 실행과 JSON diff 기록(`out/dist-test/after/`). SwiftUI 앱 코드는 그대로 유지.
+- **NOW**: 배포판 0단계(윈도우 실측) 준비. 계획: [DIST_PLAN.md](DIST_PLAN.md)
+- **NEXT**: 2단계 Tauri 앱. 배포판 기본 프로필에서 개인 과목 용어(`_PE_TERMS`) 빼기
+- **DONE (2026-10-06)**: 배포판 1단계 엔진 분리(공통/맥/윈도우 자리 표시, 개인 경로 제거, 모델·바이너리 인자, ENGINE_PROTOCOL.md). 테스트 27개 통과. 회귀(한국어 3분·영어 2분·실시간 30초)는 맥에서 직접 돌려 기준과 대본이 똑같음을 확인

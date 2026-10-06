@@ -206,4 +206,4 @@ commit/partial 시간과 통계를 계산한다. MLX 객체는 맥 백엔드 밖
 대본은 date/source 줄만 제외. 일괄은 stage/status 순서, 실시간은 type 순서와 commit text를 비교한다.
 진행률·통계 시간·출력 폴더는 비교 대상이 아니다. 결과는 `after/regression.diff`, 통과 0/불일치 1.
 병렬 작업의 메시지 교차 순서는 기존부터 비결정적이므로 실제 diff가 있으면 숨기지 않고 보고한다.
-이번 sandbox 실행은 Metal 접근 실패로 새 대본이 생성되지 않았으며, 모델 회귀 통과를 확인하지 못했다.
+2026-10-06 맥(Metal 사용 가능)에서 실행: 한국어·영어 대본은 date/source 외 동일, 실시간 type 순서와 commit text 동일. 영어 진행 메시지에서 asr progress와 diarize done 순서만 바뀜(병렬 처리로 원래 비결정적).
