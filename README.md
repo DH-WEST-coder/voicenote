@@ -26,9 +26,23 @@ open app/build/VNote.app
 
 | 경로 | 내용 |
 |---|---|
-| `voicenote.py` | 엔진: 변환 → 받아쓰기 ‖ 화자 분리 → 합치기 → 힌트 누출 제거 → .md |
+| `voicenote.py` | 앱 호환 엔진 진입점 (`engine.cli.main`) |
+| `engine/cli.py` | 기존 CLI·JSONL, 백엔드 선택, 일괄·실시간 처리 순서 |
+| `engine/core.py` | 설정·프로필, 합치기, 힌트 누출 제거, Markdown, 진행 보고 |
+| `engine/backends/base.py` | 백엔드·실시간 세션 인터페이스와 dataclass |
+| `engine/backends/mac.py` | MLX Qwen3-ASR·aligner, FluidAudio, afconvert |
+| `engine/backends/win.py` | 0단계 실측 전 Windows 자리 표시 |
+| `ENGINE_PROTOCOL.md` | CLI 인자·JSONL·종료 코드·Markdown 계약 |
+| `tests/` | 모델 없는 pytest와 기준 출력 비교 도구 |
 | `app/` | SwiftUI 메뉴바·노트 앱 (Xcode 없이 `app/build.sh`) |
 | `app/Sources/VoiceNote/AutoPreprocess.swift` | 위키 자동 전처리 스케줄러(위키 쪽 `auto_preprocess.sh`를 앱의 자식 프로세스로 15분마다 실행 — launchd는 Drive TCC에 막혀 대체) |
 | `merge.py`, `diarize.py`, `bench_whisper.py` | 벤치마크 때 쓴 스크립트 |
 
 위키 vault 위치는 `~/Library/Application Support/VoiceNote/config.json`의 `vault`(+`semester`) 한 곳에서만 바꾼다(앱 설정의 "위키 vault 경로"에서도 가능). 프로필의 `wiki_dir`은 vault 기준 상대경로다. 확인: `.venv/bin/python voicenote.py show-config`.
+
+
+## Current Work
+
+- **NOW**: 배포판 1단계 엔진 분리 구현 완료. 모델 없는 테스트 27개 통과.
+- **NEXT**: Metal 접근 가능한 macOS 세션에서 한국어·영어·실시간 회귀 재실행. 현재 sandbox에서는 `No Metal device available`로 실패하여 대본 일치 확인 불가.
+- **DONE**: 공통/맥/윈도우 백엔드 구조, 개인 경로 제거, 모델·바이너리 인자, ENGINE_PROTOCOL.md, 실제 회귀 실행과 JSON diff 기록(`out/dist-test/after/`). SwiftUI 앱 코드는 그대로 유지.
