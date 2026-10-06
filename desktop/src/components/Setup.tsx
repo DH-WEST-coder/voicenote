@@ -3,13 +3,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ko } from '../i18n/ko';
 import { Settings } from '../types';
+import { ModelProgress } from './ModelProgress';
 interface Device {
     appleSilicon: boolean;
     memoryBytes: number;
     freeBytes: number;
     recommended: string;
 }
-export function Setup({ settings,onSettings,connected,login,modelProgress,download,onError,testRecording }: {
+export function Setup({ settings,onSettings,connected,login,modelProgress,download,retryDownload,onError,testRecording }: {
     testRecording: () => void;
     settings: Settings;
     onSettings: (s: Settings) => void;
@@ -22,6 +23,7 @@ export function Setup({ settings,onSettings,connected,login,modelProgress,downlo
         text: string;
     };
     download: (set: string) => void;
+    retryDownload: () => void;
     onError: (e: unknown) => void;
 }) {
     const [step,setStep]=useState(0);
@@ -75,9 +77,7 @@ export function Setup({ settings,onSettings,connected,login,modelProgress,downlo
                 <button disabled={modelProgress.busy||!device?.appleSilicon} onClick={() => download(set)}>
                     {modelProgress.busy? ko.downloading:ko.download}
                 </button>
-                <p>
-                    {modelProgress.text}
-                </p>
+                <ModelProgress value={modelProgress} retry={retryDownload}/>
             </>}
             {step===3&&<>
                 <p>

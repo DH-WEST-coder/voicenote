@@ -43,7 +43,8 @@ function App() {
         requestId: string;
         terms: boolean;
     }|null>(null);
-    const [modelProgress,setModelProgress]=useState({ busy: false,done: false,text: '',modelSet: '' });
+    const [modelProgress,setModelProgress]=useState<{ busy: boolean; done: boolean; text: string; modelSet: string; status?: string; model?: string; downloadedBytes?: number; totalBytes?: number; bytesPerSec?: number; progress?: number; lastByteAt?: number; error?: boolean }>({ busy: false,done: false,text: '',modelSet: '' });
+    const [translocated,setTranslocated]=useState(false);
     const pendingTerms=useRef(new Set<string>());
     const [update,setUpdate]=useState<{
         html_url: string;
@@ -95,6 +96,7 @@ function App() {
     },[]);
     useEffect(() => {
         void refresh();
+        invoke<{translocated:boolean}>('startup_status').then(s => setTranslocated(s.translocated)).catch(() => { });
         invoke<boolean>('chat_status').then(setConnected).catch(() => { });
         invoke<{
             html_url: string;
@@ -156,9 +158,14 @@ function App() {
             progress?: number;
             message?: string;
             model_set?: string;
+            downloaded_bytes?: number;
+            total_bytes?: number;
+            bytes_per_sec?: number;
         }>('model-progress',({ payload: p }) => {
-            setModelProgress({ busy: !['done','error'].includes(p.status),done: p.status==='done',modelSet: p.model_set||'',text: p.status==='done'? ko.modelDone:p.status==='error'? p.message||ko.retryDownload:`${p.model||''} ${Math.round((p.progress||0)*100)}%` }); if(p.status==='done') void refresh(); if(p.status==='error')
-                fail(p.message||ko.retryDownload);
+            setModelProgress(old => {
+                const downloaded=p.downloaded_bytes??old.downloadedBytes??0;
+                return { ...old,busy: !['done','error'].includes(p.status),done: p.status==='done',error:p.status==='error',status:p.status,model:p.model||old.model,modelSet:p.model_set||old.modelSet,text:p.status==='done'? ko.modelDone:p.status==='error'? p.message||ko.retryDownload:old.text,downloadedBytes:downloaded,totalBytes:p.total_bytes??old.totalBytes,bytesPerSec:p.bytes_per_sec??0,progress:p.progress??old.progress,lastByteAt:downloaded>(old.downloadedBytes||0)?Date.now():(old.lastByteAt||Date.now()) };
+            }); if(p.status==='done') void refresh();
         }));
         void register(listen<{
             noteId: string;
@@ -352,12 +359,13 @@ function App() {
         }
     }
     function insert(text: string) { const detail=latest.current.details[selected]||blank; const t=clock(); setText(selected,detail.text+(detail.text&&!detail.text.endsWith('\n')? '\n':'')+(t!==null? `[${time(t)}] `:'')+text.trim()+'\n'); }
-    function download(modelSet: string) { setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet }); invoke('download_models',{ modelSet }).catch(e => { setModelProgress({ busy: false,done: false,text: String(e),modelSet }); fail(e); }); }
+    function download(modelSet: string) { setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet,lastByteAt:Date.now(),status:'connecting',downloadedBytes:0,totalBytes:0,progress:0 }); invoke('download_models',{ modelSet }).catch(e => setModelProgress(old => ({ ...old,busy:false,error:true,text:String(e) }))); }
     const note=data?.notes.find(n => n.id===selected);
     const detail=details[selected]||blank;
     const materials=note?.materials||[];
     const material=materials.find(m => m.id===materialId)||materials[0];
     const lines=note? combinedLines(note,detail):[];
+    if(translocated) return <div className="overlay"><section className="modal"><h1>VNote를 응용 프로그램 폴더로 옮긴 뒤 다시 열어 주세요</h1></section></div>;
     return <>
         <header>
             <b>
@@ -556,8 +564,8 @@ function App() {
                 </footer>
             </form>
         </div>}
-        {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} modelProgress={modelProgress} onError={fail} />}
-        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} progress={modelProgress} onError={fail} />}
+        {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} retryDownload={() => download(modelProgress.modelSet)} modelProgress={modelProgress} onError={fail} />}
+        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} retryDownload={() => download(modelProgress.modelSet)} progress={modelProgress} onError={fail} />}
     </>;
 }
 export default App;

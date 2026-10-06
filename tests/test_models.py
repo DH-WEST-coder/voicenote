@@ -37,7 +37,8 @@ def test_download_lite_and_preserve_config(work_dir, monkeypatch, capsys):
     models.CONFIG.write_text('{"other": 1}')
     called = []
     monkeypatch.setattr('huggingface_hub.snapshot_download', lambda repo, **kw: called.append(repo))
-    monkeypatch.setattr(models, 'warm_fluid', lambda emit: called.append('fluid'))
+    monkeypatch.setattr(models, 'model_sizes', lambda repos, api: {repo: 0 for repo in repos})
+    monkeypatch.setattr(models, 'warm_fluid', lambda emit, *args: called.append('fluid'))
     assert models.run_models(SimpleNamespace(model_action='download', set='lite', json=True)) == 0
     assert called == [models.LIVE_MODEL, models.ALIGNER, 'fluid']
     assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': models.LIVE_MODEL}
@@ -51,6 +52,7 @@ def test_download_failure_keeps_selected_model(work_dir, monkeypatch, capsys):
     def fail(*args, **kwargs):
         raise RuntimeError('offline')
     monkeypatch.setattr('huggingface_hub.snapshot_download', fail)
+    monkeypatch.setattr(models, 'model_sizes', lambda repos, api: {repo: 0 for repo in repos})
     assert models.run_models(SimpleNamespace(model_action='download', set='full', json=True)) == 1
     assert json.loads(models.CONFIG.read_text())['asr_model'] == 'old'
     assert json.loads(capsys.readouterr().out.splitlines()[-1])['status'] == 'error'
@@ -149,6 +151,7 @@ def test_download_saves_after_no_speech(work_dir, monkeypatch, capfd, model_set,
     monkeypatch.setenv('HF_HOME', str(work_dir / 'models'))
     models.CONFIG.write_text('{"other": 1}')
     monkeypatch.setattr('huggingface_hub.snapshot_download', lambda *a, **kw: None)
+    monkeypatch.setattr(models, 'model_sizes', lambda repos, api: {repo: 0 for repo in repos})
     assert models.run_models(SimpleNamespace(model_action='download', set=model_set, json=True)) == 0
     assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': chosen}
     assert json.loads(capfd.readouterr().out.splitlines()[-1])['status'] == 'done'
@@ -160,7 +163,46 @@ def test_missing_fluid_models_fail_with_last_stderr(work_dir, monkeypatch, capfd
     monkeypatch.setenv('HF_HOME', str(work_dir / 'models'))
     models.CONFIG.write_text('{"asr_model": "old"}')
     monkeypatch.setattr('huggingface_hub.snapshot_download', lambda *a, **kw: None)
+    monkeypatch.setattr(models, 'model_sizes', lambda repos, api: {repo: 0 for repo in repos})
     assert models.run_models(SimpleNamespace(model_action='download', set='full', json=True)) == 1
     assert json.loads(models.CONFIG.read_text()) == {'asr_model': 'old'}
     message = json.loads(capfd.readouterr().out.splitlines()[-1])['message']
     assert message == f'FluidAudio 모델 준비 실패: {exit_code}: noSpeechDetected'
+
+
+def test_download_progress_counts_incomplete_blobs_and_xet(work_dir, monkeypatch, capsys):
+    import time
+    from types import SimpleNamespace
+    monkeypatch.setenv('HF_HOME', str(work_dir / 'hf'))
+    monkeypatch.setenv('HF_XET_CACHE', str(work_dir / 'xet'))
+    monkeypatch.setenv('TMPDIR', str(work_dir / 'tmp'))
+    monkeypatch.setattr(models, 'CONFIG', work_dir / 'config.json')
+    existing = models.cache_root() / ('models--' + models.LIVE_MODEL.replace('/', '--')) / 'blobs' / 'cached-weight'
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_bytes(b'existing')
+    monkeypatch.setattr(models, 'warm_fluid', lambda emit, *args: None)
+    monkeypatch.setattr(models, 'save_model', lambda model: None)
+    monkeypatch.setattr('huggingface_hub.HfApi', lambda: SimpleNamespace(model_info=lambda repo, **kw: SimpleNamespace(siblings=[SimpleNamespace(size=32)])))
+    def fake_download(repo, **kwargs):
+        assert kwargs['cache_dir'] == models.cache_root()
+        incomplete = models.cache_root() / ('models--' + repo.replace('/', '--')) / 'blobs' / 'weight.incomplete'
+        incomplete.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(4):
+            with incomplete.open('ab') as f:
+                f.write(b'12345678')
+            xet = work_dir / 'xet' / 'chunk'
+            xet.parent.mkdir(parents=True, exist_ok=True)
+            xet.write_bytes(b'chunk-data')
+            time.sleep(1.1)
+        incomplete.rename(incomplete.with_suffix(''))
+    monkeypatch.setattr('huggingface_hub.snapshot_download', fake_download)
+    assert models.run_models(SimpleNamespace(model_action='download', set='lite', json=True)) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert all(row['stage'] == 'models' for row in rows)
+    assert all(isinstance(row, dict) for row in rows)
+    assert rows[0]['status'] == 'connecting'
+    assert rows[0]['downloaded_bytes'] == len(b'existing')
+    updates = [row for row in rows if row.get('downloaded_bytes', 0) > 0]
+    assert updates
+    assert any(row['progress'] > 0 and row['total_bytes'] == 64 for row in updates)
+    assert all('bytes_per_sec' in row for row in updates)

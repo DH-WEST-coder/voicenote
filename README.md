@@ -43,6 +43,6 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **NOW**: MLX symlink 복원과 macOS 14.0 최소 버전을 반영. pytest 42개·Rust 18개, 앱 서명 및 189개 Mach-O minos 검사 통과. DMG 생성·CRC 검증 통과.
-- **NEXT**: 디스크 장치 접근이 가능한 환경에서 DMG attach 검사와 Opus Metal·모델·설치 확인 후 배포판 보관. [검증 보고](DIST_3_REPORT.md)
-- **DONE (2026-10-06)**: Opus 검토 다운로드 버그 수정·회귀 테스트, Rust/TSX 포맷. pytest 42개·Rust 18개·프런트 빌드 통과. 엔진 onedir·FluidAudio/Codex·SwiftPM 리소스 번들, ad-hoc 서명·모델 없는 번들 명령 검증, 배포 문서·라이선스 고지.
+- **NOW**: 0.1.1 다운로드 바이트 진행률, 캐시 이어받기, translocation 차단·quarantine 엔진 재시도 구현. pytest 44개·Rust 20개·프런트 빌드 통과.
+- **NEXT**: DMG attach는 hdiutil 장치 제한으로 미완료. Opus가 실제 네트워크 다운로드·GUI·설치 검증.
+- **DONE (2026-10-06)**: 0.1.0 배포 구성·문서·라이선스 및 검증.

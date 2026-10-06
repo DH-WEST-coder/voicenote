@@ -19,6 +19,96 @@ pub struct Engine {
     pub closing: AtomicBool,
     pub downloads: Mutex<bool>,
 }
+pub const TRANSLOCATION_MESSAGE: &str = "VNote를 응용 프로그램 폴더로 옮긴 뒤 다시 열어 주세요";
+pub const QUARANTINE_ENGINE_MESSAGE: &str = "macOS가 엔진 실행을 막았습니다. 시스템 설정 → 개인정보 보호 및 보안에서 허용하거나, 앱을 응용 프로그램 폴더로 옮긴 뒤 다시 실행하세요.";
+
+pub fn bundle_path(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    exe.parent()?
+        .parent()?
+        .parent()
+        .map(std::path::Path::to_path_buf)
+}
+pub fn is_translocated_path(path: &std::path::Path) -> bool {
+    path.components()
+        .any(|c| c.as_os_str() == "AppTranslocation")
+}
+pub fn is_app_translocated() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| bundle_path(&p))
+        .is_some_and(|p| is_translocated_path(&p))
+}
+pub fn clear_bundle_quarantine() -> bool {
+    if is_app_translocated() {
+        return false;
+    }
+    let Some(bundle) = std::env::current_exe().ok().and_then(|p| bundle_path(&p)) else {
+        return false;
+    };
+    let mut failed = false;
+    for target in [
+        bundle.join("Contents/Resources/vnote-engine"),
+        bundle.join("Contents/MacOS/fluidaudiocli"),
+    ] {
+        if target.exists() {
+            if let Ok(status) = Command::new("/usr/bin/xattr")
+                .args(["-dr", "com.apple.quarantine"])
+                .arg(&target)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+            {
+                if !status.success() {
+                    failed = true;
+                }
+            } else {
+                failed = true;
+            }
+        }
+    }
+    failed
+}
+pub fn signaled(exit: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        exit.signal().is_some()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = exit;
+        false
+    }
+}
+pub fn spawn_with_retry(app: &AppHandle, mut cmd: Command) -> Result<Child, String> {
+    if is_app_translocated() {
+        return Err(TRANSLOCATION_MESSAGE.into());
+    }
+    for attempt in 0..2 {
+        let mut child = cmd.spawn().map_err(err)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Some(exit) = child.try_wait().map_err(err)? {
+                if signaled(&exit) && attempt == 0 {
+                    thread::sleep(std::time::Duration::from_secs(2));
+                    break;
+                }
+                if signaled(&exit) {
+                    app.state::<Runtime>()
+                        .storage
+                        .log("engine terminated by signal");
+                    return Err(QUARANTINE_ENGINE_MESSAGE.into());
+                }
+                return Ok(child);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(child);
+            }
+            thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    Err(QUARANTINE_ENGINE_MESSAGE.into())
+}
 // 환경 명령은 shell 실행 없이 인자로 분리한다. 따옴표/공백 경로 지원.
 pub fn split_command(s: &str) -> Result<Vec<String>, String> {
     let mut words = vec![];
@@ -80,6 +170,9 @@ pub fn binary(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String>
         .ok_or("엔진이 설치되지 않았습니다".into())
 }
 pub fn command(app: &AppHandle, s: &Storage) -> Result<Command, String> {
+    if is_app_translocated() {
+        return Err(TRANSLOCATION_MESSAGE.into());
+    }
     let override_cmd = std::env::var("VNOTE_ENGINE_CMD").ok();
     let mut cmd = if let Some(v) = override_cmd {
         let parts = split_command(&v)?;
@@ -220,20 +313,19 @@ fn transcribe(app: &AppHandle, s: &Storage, id: &str) -> Result<(), String> {
     notify(app);
     let (file, lang) = terms(s, &r.note_id, id)?;
     let result = (|| {
-        let mut child = command(app, s)?
-            .args([
-                "transcribe",
-                &r.path,
-                "--json-progress",
-                "--out",
-                s.root.join("transcripts").to_str().unwrap(),
-                "--terms-file",
-                &file,
-                "--language",
-                &lang,
-            ])
-            .spawn()
-            .map_err(err)?;
+        let mut command = command(app, s)?;
+        command.args([
+            "transcribe",
+            &r.path,
+            "--json-progress",
+            "--out",
+            s.root.join("transcripts").to_str().unwrap(),
+            "--terms-file",
+            &file,
+            "--language",
+            &lang,
+        ]);
+        let mut child = spawn_with_retry(app, command)?;
         stderr(app.clone(), child.stderr.take().unwrap());
         let stdout = child.stdout.take().unwrap();
         let child = track(app, child)?;
@@ -260,7 +352,11 @@ fn transcribe(app: &AppHandle, s: &Storage, id: &str) -> Result<(), String> {
             return Err(e);
         }
         if !exit.success() {
-            return Err("엔진 종료 오류".into());
+            return Err(if signaled(&exit) {
+                QUARANTINE_ENGINE_MESSAGE.into()
+            } else {
+                "엔진 종료 오류".into()
+            });
         }
         let path = s.owned(&output.ok_or("엔진 결과 없음")?)?;
         let md = std::fs::read_to_string(&path).map_err(err)?;
@@ -346,11 +442,11 @@ pub fn start_live(
     let path = s.root.join("live").join(format!("{id}.jsonl"));
     let mut output_file = std::fs::File::create(path).map_err(err)?;
     let result = (|| {
-        let mut child = command(app, s)?
+        let mut command = command(app, s)?;
+        command
             .args(["live", "--terms-file", &file, "--language", &lang])
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(err)?;
+            .stdin(Stdio::piped());
+        let mut child = spawn_with_retry(app, command)?;
         stderr(app.clone(), child.stderr.take().unwrap());
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -390,9 +486,17 @@ pub fn start_live(
                 }
             }
             let exit = wait(&child);
-            if !finished || !exit.is_ok_and(|s| s.success()) {
+            if !finished || !exit.as_ref().is_ok_and(|s| s.success()) {
                 handle.state::<Runtime>().storage.log("live process failed");
-                let _=handle.emit("live-message",json!({"id":key,"message":{"type":"error","message":"실시간 엔진이 종료되었습니다. 녹음은 계속 저장됩니다."}}));
+                let message = if exit.as_ref().is_ok_and(signaled) {
+                    QUARANTINE_ENGINE_MESSAGE
+                } else {
+                    "실시간 엔진이 종료되었습니다. 녹음은 계속 저장됩니다."
+                };
+                let _ = handle.emit(
+                    "live-message",
+                    json!({"id":key,"message":{"type":"error","message":message}}),
+                );
             }
             let _ = output_file.sync_all();
             let _ = std::fs::remove_file(terms_file);
@@ -424,6 +528,27 @@ mod tests {
             vec!["/a b/python", "/c/script.py"]
         );
         assert!(split_command("'bad").is_err());
+    }
+    #[test]
+    fn detects_app_translocation_from_bundle_executable() {
+        let exe = std::path::Path::new(
+            "/private/var/folders/x/AppTranslocation/d/VNote.app/Contents/MacOS/VNote",
+        );
+        let bundle = bundle_path(exe).unwrap();
+        assert!(is_translocated_path(&bundle));
+        assert_eq!(
+            bundle,
+            std::path::PathBuf::from("/private/var/folders/x/AppTranslocation/d/VNote.app")
+        );
+        assert!(!is_translocated_path(std::path::Path::new(
+            "/Applications/VNote.app"
+        )));
+    }
+    #[test]
+    fn classifies_signal_exit() {
+        use std::os::unix::process::ExitStatusExt;
+        assert!(signaled(&std::process::ExitStatus::from_raw(9)));
+        assert!(!signaled(&std::process::ExitStatus::from_raw(0)));
     }
 }
 

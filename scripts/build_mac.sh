@@ -32,7 +32,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/VNote.app"
 ln -s /Applications "$STAGE/Applications"
-DMG="$BUNDLE/dmg/VNote_0.1.0_aarch64.dmg"
+DMG="$BUNDLE/dmg/VNote_0.1.1_aarch64.dmg"
 rm -f "$DMG"
 if ! hdiutil create -volname VNote -srcfolder "$STAGE" -format UDZO -ov "$DMG"; then
   # 디스크 장치를 붙일 수 없는 빌드 환경에서도 HFS 이미지는 파일로 생성 가능.

@@ -27,6 +27,10 @@ fn log_error(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
+fn startup_status() -> Value {
+    json!({"translocated": engine::is_app_translocated(), "message": engine::TRANSLOCATION_MESSAGE})
+}
+#[tauri::command]
 fn load_data(app: AppHandle) -> Result<Data, String> {
     Ok(app
         .state::<Runtime>()
@@ -404,12 +408,19 @@ async fn device_info(app: AppHandle) -> Result<Value, String> {
 async fn models_status(app: AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Runtime>();
-        let result = engine::command(&app, &state.storage)?
-            .args(["models", "status", "--json"])
-            .output()
-            .map_err(err)?;
-        let v = engine::parse_json_line(String::from_utf8_lossy(&result.stdout).trim())?;
-        if result.status.success() {
+        let mut command = engine::command(&app, &state.storage)?;
+        command.args(["models", "status", "--json"]);
+        let mut child = engine::spawn_with_retry(&app, command)?;
+        let mut output = String::new();
+        if let Some(stdout) = child.stdout.take() {
+            std::io::Read::read_to_string(&mut BufReader::new(stdout), &mut output).map_err(err)?;
+        }
+        let result = child.wait().map_err(err)?;
+        if engine::signaled(&result) {
+            return Err(engine::QUARANTINE_ENGINE_MESSAGE.into());
+        }
+        let v = engine::parse_json_line(output.trim())?;
+        if result.success() {
             Ok(v)
         } else {
             Err(v["message"].as_str().unwrap_or("모델 상태 오류").into())
@@ -428,10 +439,9 @@ fn download_models(app: AppHandle, model_set: String) -> Result<(), String> {
     if *busy {
         return Err("이미 다운로드 중".into());
     }
-    let mut child = engine::command(&app, &state.storage)?
-        .args(["models", "download", "--set", &model_set, "--json"])
-        .spawn()
-        .map_err(err)?;
+    let mut command = engine::command(&app, &state.storage)?;
+    command.args(["models", "download", "--set", &model_set, "--json"]);
+    let mut child = engine::spawn_with_retry(&app, command)?;
     engine::stderr(app.clone(), child.stderr.take().unwrap());
     let stdout = child.stdout.take().unwrap();
     let child = engine::track(&app, child)?;
@@ -464,8 +474,10 @@ fn download_models(app: AppHandle, model_set: String) -> Result<(), String> {
             }
         }
         let exit = engine::wait(&child);
+        let success = exit.as_ref().is_ok_and(|s| s.success());
+        let signaled = exit.as_ref().is_ok_and(engine::signaled);
         let state = app.state::<Runtime>();
-        if completion.is_some() && failure.is_none() && exit.is_ok_and(|s| s.success()) {
+        if completion.is_some() && failure.is_none() && success {
             let mut d = state.storage.data.lock().unwrap();
             d.settings.model_set = model_set;
             match state.storage.save(&d) {
@@ -476,7 +488,11 @@ fn download_models(app: AppHandle, model_set: String) -> Result<(), String> {
                 Err(_) => failure = Some("모델 설정을 저장하지 못했습니다".into()),
             }
         } else if failure.is_none() {
-            failure = Some("모델 다운로드 실패. 다시 시도하세요.".into());
+            failure = Some(if signaled {
+                engine::QUARANTINE_ENGINE_MESSAGE.into()
+            } else {
+                "모델 다운로드 실패. 다시 시도하세요.".into()
+            });
         }
         if let Some(message) = failure {
             state.storage.log("model download failed");
@@ -541,6 +557,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            let quarantine_cleanup_failed = engine::clear_bundle_quarantine();
             let root = if cfg!(debug_assertions) {
                 std::env::var_os("VNOTE_DATA_DIR")
                     .map(std::path::PathBuf::from)
@@ -549,6 +566,9 @@ pub fn run() {
                 dirs::data_dir().ok_or("데이터 경로 없음")?.join("VNote")
             };
             let storage = Storage::open(root).map_err(std::io::Error::other)?;
+            if quarantine_cleanup_failed {
+                storage.log("quarantine attribute cleanup failed");
+            }
             let handle = app.handle().clone();
             let engine = engine::init(handle.clone());
             app.manage(Runtime {
@@ -567,6 +587,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            startup_status,
             log_error,
             load_data,
             save_project,

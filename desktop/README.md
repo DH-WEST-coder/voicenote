@@ -4,9 +4,9 @@ Tauri v2 + React/TypeScript. 배포판 3단계. 엔진 onedir·FluidAudio·Codex
 
 ## Current Work
 
-- **NOW**: 0.1.0 맥 패키징 구현·서명된 앱 검증 완료. DMG 전체 빌드·서명·번들 smoke test 완료. 커밋은 환경 제한으로 미완료.
-- **NEXT**: 권한 있는 환경에서 A/B 커밋 및 Opus 실제 Metal·모델·마이크·설치 확인.
-- **DONE**: 2단계 UI와 엔진 연결, Opus 다운로드 버그 수정, rustfmt·TSX 정리. pytest 42개·Rust 18개·프런트 빌드 통과.
+- **NOW**: 0.1.1 다운로드 진행률·quarantine 엔진 복구 구현. pytest 44개·Rust 20개·프런트 빌드 통과.
+- **NEXT**: hdiutil attach 가능 환경에서 DMG 검사 후 Opus 실제 다운로드·GUI·Metal·마이크·설치 확인.
+- **DONE**: 첫 실행·설정 진행률 UI, translocation 차단·엔진 재시도, 문제 해결 안내.
 
 ## 개발 실행
 
@@ -52,7 +52,7 @@ HF_HOME="$(pwd)/out/dist-test/model-status/models" \
 
 빌드 순서: 엔진 → FluidAudio 사이드카·SwiftPM 리소스 → Tauri app → PyInstaller 원본 symlink 복원 → 모든 Mach-O/프레임워크 ad-hoc 서명 → 번들 엔진 모델 없는 smoke test → 앱 minos 검사 → 수정된 앱으로 DMG 생성·검증 및 마운트 내 symlink 검사. 기본 `hdiutil create`가 디스크 장치 오류로 실패하면 HFS hybrid 파일을 생성하고 UDZO로 변환한다. `--options 0`으로 hardened runtime의 Python dylib Team ID 충돌을 피한다. Apple Developer ID·공증은 없다.
 
-결과: `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/VNote.app`, `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/VNote_0.1.0_aarch64.dmg`. 사용자 문서·라이선스는 루트 `release/`, 작업 검증·Opus 명령은 `DIST_3_REPORT.md`다.
+결과: `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/VNote.app`, `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/VNote_0.1.1_aarch64.dmg`. 사용자 문서·라이선스는 루트 `release/`, 작업 검증·Opus 명령은 `DIST_3_REPORT.md`다.
 
 테스트 출력은 `out/dist-test` 아래에만 만든다. pytest collection 때 OS 설정 경로를 시험 경로로 바꿔 개인용 설정 읽기도 막는다. 실제 MLX 모델은 로드하지 않는다.
 

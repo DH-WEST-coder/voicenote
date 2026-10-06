@@ -3,7 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { ko } from '../i18n/ko';
 import { Settings } from '../types';
-export function SettingsView({ settings,change,close,connected,login,logout,download,progress,onError }: {
+import { ModelProgress } from './ModelProgress';
+export function SettingsView({ settings,change,close,connected,login,logout,download,retryDownload,progress,onError }: {
     settings: Settings;
     change: (s: Settings) => void;
     close: () => void;
@@ -11,9 +12,20 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
     login: () => void;
     logout: () => void;
     download: (s: string) => void;
+    retryDownload: () => void;
     progress: {
         busy: boolean;
         text: string;
+        done: boolean;
+        modelSet: string;
+        error?: boolean;
+        status?: string;
+        model?: string;
+        downloadedBytes?: number;
+        totalBytes?: number;
+        bytesPerSec?: number;
+        progress?: number;
+        lastByteAt?: number;
     };
     onError: (e: unknown) => void;
 }) {
@@ -60,9 +72,7 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
             <button disabled={progress.busy} onClick={() => download(modelSet)}>
                 {ko.download}
             </button>
-            <p>
-                {progress.text}
-            </p>
+            <ModelProgress value={progress} retry={retryDownload}/>
             {models.map(m => <p key={m.id}>
                 {m.id}: {m.downloaded? '✓':'—'} · {(m.size_bytes/2**30).toFixed(2)} GB</p>)}
             <label>
