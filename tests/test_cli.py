@@ -1,6 +1,8 @@
 import argparse
 import io
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from engine import cli
@@ -91,3 +93,21 @@ def test_live_backend_error_is_json(monkeypatch):
     events = [json.loads(line) for line in output.getvalue().splitlines()]
     assert [e['type'] for e in events] == ['loading', 'error']
     assert events[-1]['message'] == "윈도우 엔진은 0단계 실측 후 구현"
+
+
+def test_selftest_imports_command():
+    root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, str(root / "voicenote.py"), "selftest-imports", "--json"],
+        cwd=root,
+        env={**os.environ, "VNOTE_BACKEND": "win"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert len(completed.stdout.splitlines()) == 1
+    report = json.loads(completed.stdout)
+    assert report["status"] == "ok"
+    assert all(check["ok"] for check in report["checks"].values())
+    assert all(item["tokens"] for item in report["checks"]["tokenizers"]["languages"].values())

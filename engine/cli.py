@@ -1,6 +1,10 @@
 """호환 CLI와 일괄/실시간 처리 순서."""
 import argparse
+import contextlib
 import datetime
+import importlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -8,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unicodedata
 from dataclasses import asdict
 from pathlib import Path
@@ -237,9 +242,74 @@ def run_live(args):
         emit(type="error", message=str(e) or type(e).__name__)
         return 1
 
+
+def selftest_imports():
+    """Build-time import smoke test; deliberately loads no model or MLX device."""
+    result = {"stage": "selftest-imports", "checks": {}}
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        try:
+            # mlx.core selects the Metal device during import on macOS. The
+            # aligner text processor only needs its type annotations at import
+            # time, so load its real source with a tiny mlx.core placeholder.
+            # This keeps the smoke test safe on headless build hosts.
+            package_spec = importlib.util.find_spec("mlx_qwen3_asr")
+            if package_spec is None or not package_spec.submodule_search_locations:
+                raise ImportError("mlx_qwen3_asr package not found")
+            package = types.ModuleType("mlx_qwen3_asr")
+            package.__path__ = list(package_spec.submodule_search_locations)
+            package.__package__ = "mlx_qwen3_asr"
+            sys.modules.setdefault("mlx_qwen3_asr", package)
+            mlx_stub = types.ModuleType("mlx")
+            core_stub = types.ModuleType("mlx.core")
+            core_stub.float16 = object()
+            mlx_stub.core = core_stub
+            sys.modules.setdefault("mlx", mlx_stub)
+            sys.modules.setdefault("mlx.core", core_stub)
+            from mlx_qwen3_asr.forced_aligner import ForcedAlignTextProcessor
+            tokenizers = {}
+            for language, text in (
+                ("Korean", "안녕하세요 세계입니다"),
+                ("Japanese", "こんにちは世界です"),
+                ("English", "hello world"),
+            ):
+                try:
+                    tokens = ForcedAlignTextProcessor.tokenize_text(text, language)
+                    tokenizers[language] = {"ok": bool(tokens), "tokens": tokens}
+                except Exception as e:
+                    cause = e.__cause__
+                    detail = f"{type(e).__name__}: {e}"
+                    if cause:
+                        detail += f" (caused by {type(cause).__name__}: {cause})"
+                    tokenizers[language] = {"ok": False, "error": detail}
+            result["checks"]["tokenizers"] = {
+                "ok": all(item["ok"] for item in tokenizers.values()), "languages": tokenizers,
+            }
+        except Exception as e:
+            result["checks"]["tokenizers"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+        for name, module in (
+            ("soundfile", "soundfile"),
+            ("huggingface_hub", "huggingface_hub"),
+            ("engine.models", "engine.models"),
+        ):
+            try:
+                __import__(module)
+                result["checks"][name] = {"ok": True}
+            except Exception as e:
+                result["checks"][name] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    ok = all(check.get("ok", False) for check in result["checks"].values())
+    result["status"] = "ok" if ok else "error"
+    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    return 0 if ok else 1
+
 def main():
     ap = argparse.ArgumentParser(prog="voicenote.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("selftest-imports", help=argparse.SUPPRESS).add_argument(
+        "--json", action="store_true", required=True
+    )
     t = sub.add_parser("transcribe")
     t.add_argument("audio")
     t.add_argument("--profile")
@@ -269,6 +339,8 @@ def main():
     download.add_argument("--set", choices=["full", "lite"], required=True)
     download.add_argument("--json", action="store_true")
     args = ap.parse_args()
+    if args.cmd == "selftest-imports":
+        return selftest_imports()
     if args.cmd == "models":
         from engine.models import run_models
         return run_models(args)

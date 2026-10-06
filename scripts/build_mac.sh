@@ -23,6 +23,7 @@ SMOKE="$(mktemp -d "$ROOT/dist-build/tmp/bundle-smoke.XXXXXX")"
 mkdir -p "$SMOKE/models" "$SMOKE/tmp"
 ENGINE="$APP/Contents/Resources/vnote-engine/vnote-engine"
 VNOTE_DATA_DIR="$SMOKE" HF_HOME="$SMOKE/models" TMPDIR="$SMOKE/tmp" "$ENGINE" --help > "$ROOT/dist-build/bundle-help.log"
+VNOTE_DATA_DIR="$SMOKE" HF_HOME="$SMOKE/models" TMPDIR="$SMOKE/tmp" "$ENGINE" selftest-imports --json > "$ROOT/dist-build/bundle-selftest-imports.json"
 VNOTE_DATA_DIR="$SMOKE" HF_HOME="$SMOKE/models" TMPDIR="$SMOKE/tmp" "$ENGINE" models status --json > "$ROOT/dist-build/bundle-status.json"
 rm -rf "$SMOKE"
 # Tauri가 만든 DMG 이후의 추가 서명을 배포 이미지에도 반영한다.

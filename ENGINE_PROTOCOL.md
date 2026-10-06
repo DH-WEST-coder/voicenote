@@ -11,6 +11,7 @@ JSON은 한 줄에 객체 하나이며 매 메시지마다 flush한다. 키 순�
 .venv/bin/python voicenote.py transcribe <audio> [옵션]
 .venv/bin/python voicenote.py live [옵션]
 .venv/bin/python voicenote.py show-config
+.venv/bin/python voicenote.py selftest-imports --json
 ```
 
 - 성공: `0`. transcribe/live 처리 중 예외(KeyboardInterrupt 포함): JSON `error` 후 `1`.
@@ -18,6 +19,7 @@ JSON은 한 줄에 객체 하나이며 매 메시지마다 flush한다. 키 순�
 - `--help`: stdout 사용법, `0`.
 - show-config의 파일 읽기/프로필 파싱 오류: 일반 Python 오류, `1`. JSON 없음.
 - OS 강제 종료나 프로세스 충돌은 JSON `error`를 보장하지 않는다.
+- `selftest-imports --json`은 빌드 검사용 숨은 명령이다. 모델/GPU 없이 aligner 토크나이저와 필수 모듈 import를 확인하고 JSON 한 줄을 출력한다. 모두 성공하면 `0`, 하나라도 실패하면 `1`.
 - transcribe/live는 `.venv/bin/python`이 존재하고 현재 인터프리터가 다른 환경이면 그 인터프리터로 재실행한다. show-config는 재실행하지 않는다.
 
 백엔드 기본 선택: `sys.platform == 'darwin'`은 `mac`, `'win32'`는 `win`.
