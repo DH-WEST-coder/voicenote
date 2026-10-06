@@ -61,29 +61,42 @@ fn codex_home(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         state.storage.root.join("codex")
     })
 }
-fn parse_models_cache(bytes: Option<&[u8]>) -> Vec<ModelOption> {
-    let Some(bytes) = bytes else { return Vec::new() };
+fn parse_models(bytes: &[u8]) -> Vec<ModelOption> {
     let Ok(cache) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
     cache["models"].as_array().into_iter().flatten().filter_map(|model| {
         let id = model["slug"].as_str()?;
-        if id.contains("review") { return None; }
+        if model["visibility"].as_str() != Some("list") { return None; }
         Some(ModelOption {
             id: id.to_owned(),
             label: model["display_name"].as_str().unwrap_or(id).to_owned(),
+            efforts: model["supported_reasoning_levels"].as_array().into_iter().flatten()
+                .filter_map(|level| level["effort"].as_str().map(str::to_owned)).collect(),
         })
     }).collect()
 }
+fn parse_models_cache(bytes: Option<&[u8]>) -> Vec<ModelOption> {
+    let Some(bytes) = bytes else { return Vec::new() };
+    parse_models(bytes)
+}
+fn models_from_output(stdout: Option<&[u8]>, cache: Option<&[u8]>) -> Vec<ModelOption> {
+    stdout.map(parse_models).filter(|models| !models.is_empty())
+        .unwrap_or_else(|| parse_models_cache(cache))
+}
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelOption { id: String, label: String }
+pub struct ModelOption { id: String, label: String, efforts: Vec<String> }
 #[tauri::command]
-pub fn chat_models(app: AppHandle) -> Vec<ModelOption> {
-    let path = codex_home(&app).map(|home| home.join("models_cache.json"));
-    let bytes = path.ok().and_then(|path| std::fs::read(path).ok());
-    parse_models_cache(bytes.as_deref())
+pub async fn chat_models(app: AppHandle) -> Vec<ModelOption> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = codex_home(&app).map(|home| home.join("models_cache.json"));
+        let cached = path.ok().and_then(|path| std::fs::read(path).ok());
+        let fresh = command(&app).ok().and_then(|mut command| command.args(["debug", "models"]).output().ok())
+            .filter(|output| output.status.success()).map(|output| output.stdout);
+        models_from_output(fresh.as_deref(), cached.as_deref())
+    }).await.unwrap_or_default()
 }
 fn reasoning_effort_arg(effort: &str) -> String {
-    let effort = match effort { "medium" | "high" => effort, _ => "low" };
+    let effort = if !effort.is_empty() && effort.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') { effort } else { "low" };
     format!("model_reasoning_effort=\"{effort}\"")
 }
 #[tauri::command]
@@ -327,14 +340,24 @@ mod tests {
     }
     #[test]
     fn models_cache_parsing() {
-        let bytes = br#"{"models":[{"slug":"gpt-one","display_name":"GPT One"},{"slug":"gpt-two"},{"slug":"gpt-review","display_name":"Review"}]}"#;
+        let bytes = br#"{"models":[{"slug":"gpt-one","display_name":"GPT One","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]},{"slug":"gpt-hidden","visibility":"hide"},{"slug":"gpt-two","visibility":"list"}]}"#;
         let models = parse_models_cache(Some(bytes));
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "gpt-one");
         assert_eq!(models[0].label, "GPT One");
+        assert_eq!(models[0].efforts, vec!["low", "high"]);
         assert_eq!(models[1].label, "gpt-two");
         assert!(parse_models_cache(None).is_empty());
         assert!(parse_models_cache(Some(b"not json")).is_empty());
+    }
+    #[test]
+    fn models_fallback_to_cache_when_stdout_is_invalid() {
+        let cache = br#"{"models":[{"slug":"cached","visibility":"list"}]}"#;
+        let models = models_from_output(Some(b"not json"), Some(cache));
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "cached");
+        assert_eq!(models_from_output(None, Some(cache))[0].id, "cached");
+        assert!(models_from_output(None, None).is_empty());
     }
     #[test]
     fn reasoning_effort_argument() {

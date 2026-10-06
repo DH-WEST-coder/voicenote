@@ -43,6 +43,7 @@ export interface Settings {
 export interface ChatModel {
     id: string;
     label: string;
+    efforts: string[];
 }
 export interface Data {
     projects: Project[];
