@@ -95,6 +95,8 @@ final class PowerMonitor: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        // Store.init 안에서 불린다. 첫 값은 로그 없이 맞춘다(refresh가 Store.shared를 부르면 재귀 초기화로 크래시).
+        onAC = Self.isOnAC() ?? true
         refresh()
         let src = IOPSNotificationCreateRunLoopSource({ _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { PowerMonitor.shared.refresh() } }
