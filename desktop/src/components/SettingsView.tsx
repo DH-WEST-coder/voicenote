@@ -2,8 +2,9 @@ import { useState,useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { ko } from '../i18n/ko';
-import { Settings } from '../types';
-export function SettingsView({ settings,change,close,connected,login,logout,download,progress,onError }: {
+import { ChatModel,Settings } from '../types';
+import { ChatModelSelect } from './ChatModelSelect';
+export function SettingsView({ settings,change,close,connected,login,logout,download,progress,onError,onModels }: {
     settings: Settings;
     change: (s: Settings) => void;
     close: () => void;
@@ -16,6 +17,7 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
         text: string;
     };
     onError: (e: unknown) => void;
+    onModels: (models: ChatModel[]) => void;
 }) {
     const [licenses,setLicenses]=useState(false);
     const [modelSet,chooseModelSet]=useState(settings.modelSet);
@@ -25,10 +27,12 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
         downloaded: boolean;
         size_bytes: number;
     }[]>([]);
+    const [chatModels,setChatModels]=useState<ChatModel[]>([]);
     useEffect(() => {
         getVersion().then(setVersion).catch(onError); invoke<{
             models: typeof models;
         }>('models_status').then(v => setModels(v.models)).catch(onError);
+        invoke<ChatModel[]>('chat_models').then(v => { setChatModels(v); onModels(v); }).catch(onError);
     },[progress.busy]);
     const folder=async (logs: boolean) => {
         try {
@@ -77,10 +81,7 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
                     </option>)}
                 </select>
             </label>
-            <label>
-                {ko.model}
-                <input value={settings.chatModel} onChange={e => change({ ...settings,chatModel: e.target.value })} />
-            </label>
+            <ChatModelSelect settings={settings} change={change} models={chatModels} />
             <p>
                 {connected? ko.connected:ko.disconnected}
             </p>

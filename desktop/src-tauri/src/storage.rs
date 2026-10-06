@@ -55,6 +55,7 @@ pub struct Settings {
     pub model_set: String,
     pub theme: String,
     pub chat_model: String,
+    pub chat_reasoning_effort: String,
     pub update_checked: String,
 }
 impl Default for Settings {
@@ -65,6 +66,7 @@ impl Default for Settings {
             model_set: "full".into(),
             theme: "system".into(),
             chat_model: String::new(),
+            chat_reasoning_effort: "low".into(),
             update_checked: String::new(),
         }
     }

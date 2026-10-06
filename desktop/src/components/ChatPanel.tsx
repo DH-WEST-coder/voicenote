@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ko } from '../i18n/ko';
-import { Message } from '../types';
-export function ChatPanel({ messages,busy,connected,ask,stop,login,insert }: {
+import { ChatModel,Message,Settings } from '../types';
+import { ChatModelSelect } from './ChatModelSelect';
+export function ChatPanel({ messages,busy,connected,ask,stop,login,insert,settings,change,models }: {
     messages: Message[];
     busy: boolean;
     connected: boolean;
@@ -10,8 +11,13 @@ export function ChatPanel({ messages,busy,connected,ask,stop,login,insert }: {
     stop: () => void;
     login: () => void;
     insert: (s: string) => void;
+    settings: Settings;
+    change: (s: Settings) => void;
+    models: ChatModel[];
 }) {
     const [q,setQ]=useState('');
+    const modelLabel=settings.chatModel? models.find(m => m.id===settings.chatModel)?.label||settings.chatModel:ko.defaultModel;
+    const effort=settings.chatReasoningEffort==='medium'||settings.chatReasoningEffort==='high'? settings.chatReasoningEffort:'low';
     return <aside className="chat">
         <h2>
             {ko.chat}
@@ -19,6 +25,10 @@ export function ChatPanel({ messages,busy,connected,ask,stop,login,insert }: {
                 {connected? ko.connected:ko.disconnected}
             </small>
         </h2>
+        <details className="chat-model-menu">
+            <summary>{modelLabel} · {ko[effort]}</summary>
+            <ChatModelSelect settings={settings} change={change} models={models} />
+        </details>
         {!connected&&<>
             <p>
                 {ko.privacy}

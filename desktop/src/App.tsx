@@ -5,7 +5,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open,save } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ko } from './i18n/ko';
-import { Data,Note,Project,Detail,Message,Line,Settings,time } from './types';
+import { Data,Note,Project,Detail,Message,Line,Settings,ChatModel,time } from './types';
 const PdfView=lazy(() => import('./components/PdfView').then(m => ({ default: m.PdfView })));
 import { NoteEditor } from './components/NoteEditor';
 import { ChatPanel } from './components/ChatPanel';
@@ -23,6 +23,7 @@ function App() {
     const [tab,setTab]=useState('transcript');
     const [materialId,setMaterialId]=useState('');
     const [connected,setConnected]=useState(false);
+    const [chatModels,setChatModels]=useState<ChatModel[]>([]);
     const [editing,setEditing]=useState<Project|null>(null);
     const [speakerEditing,setSpeakerEditing]=useState<{ note: Note; speaker: string; name: string }|null>(null);
     const testTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -103,6 +104,9 @@ function App() {
         const timer=setInterval(() => { invoke<boolean>('chat_status').then(setConnected).catch(() => { }); },4000);
         return () => { clearInterval(timer); if(testTimer.current) clearTimeout(testTimer.current); };
     },[refresh]);
+    useEffect(() => {
+        if(connected) invoke<ChatModel[]>('chat_models').then(setChatModels).catch(fail);
+    },[connected,fail]);
     useEffect(() => {
         if(selected&&!details[selected])
             loadDetail(selected).then(detail => setDetails(old => ({ ...old,[selected]: old[selected]||detail }))).catch(fail);
@@ -502,7 +506,7 @@ function App() {
                     {ko.empty}
                 </p>}
             </section>
-            {chatVisible&&<ChatPanel messages={detail.messages} connected={connected} busy={!!chatBusy} ask={ask} stop={() => void run('chat_stop')} login={() => void run('chat_login')} insert={insert} />}
+            {chatVisible&&data&&<ChatPanel messages={detail.messages} connected={connected} busy={!!chatBusy} ask={ask} stop={() => void run('chat_stop')} login={() => void run('chat_login')} insert={insert} settings={data.settings} change={changeSettings} models={chatModels} />}
         </main>
         {speakerEditing&&<div className="overlay">
             <form className="modal" onSubmit={e => { e.preventDefault(); void run('save_note',{ fields: ['speakerNames'],note: { ...speakerEditing.note,speakerNames: { ...speakerEditing.note.speakerNames,[speakerEditing.speaker]: speakerEditing.name.trim()||speakerEditing.speaker } } }).then(() => setSpeakerEditing(null)); }}>
@@ -557,7 +561,7 @@ function App() {
             </form>
         </div>}
         {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} modelProgress={modelProgress} onError={fail} />}
-        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} progress={modelProgress} onError={fail} />}
+        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} progress={modelProgress} onError={fail} onModels={setChatModels} />}
     </>;
 }
 export default App;
