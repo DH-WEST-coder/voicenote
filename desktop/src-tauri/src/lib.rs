@@ -618,6 +618,7 @@ pub fn run() {
             download_models,
             export_note,
             chatgpt::chat_status,
+            chatgpt::chat_models,
             chatgpt::chat_login,
             chatgpt::chat_logout,
             chatgpt::chat_stop,

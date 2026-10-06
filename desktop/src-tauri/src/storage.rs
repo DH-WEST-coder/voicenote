@@ -56,6 +56,7 @@ pub struct Settings {
     pub live_model: String,
     pub theme: String,
     pub chat_model: String,
+    pub chat_reasoning_effort: String,
     pub update_checked: String,
 }
 impl Default for Settings {
@@ -67,6 +68,7 @@ impl Default for Settings {
             live_model: "moona3k/mlx-qwen3-asr-0.6b-4bit".into(),
             theme: "system".into(),
             chat_model: String::new(),
+            chat_reasoning_effort: "low".into(),
             update_checked: String::new(),
         }
     }

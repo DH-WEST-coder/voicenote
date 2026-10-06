@@ -37,7 +37,12 @@ export interface Settings {
     liveModel: string;
     theme: string;
     chatModel: string;
+    chatReasoningEffort: string;
     updateChecked: string;
+}
+export interface ChatModel {
+    id: string;
+    label: string;
 }
 export interface Data {
     projects: Project[];

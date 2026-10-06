@@ -34,13 +34,7 @@ impl Default for Chat {
 fn command(app: &AppHandle) -> Result<Command, String> {
     let state = app.state::<Runtime>();
     let mut c = Command::new(engine::binary(app, "codex")?);
-    let home = if cfg!(debug_assertions) {
-        std::env::var_os("VNOTE_CODEX_HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or(state.storage.root.join("codex"))
-    } else {
-        state.storage.root.join("codex")
-    };
+    let home = codex_home(app)?;
     std::fs::create_dir_all(&home).map_err(err)?;
     #[cfg(unix)]
     {
@@ -56,6 +50,41 @@ fn command(app: &AppHandle) -> Result<Command, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     Ok(c)
+}
+fn codex_home(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let state = app.state::<Runtime>();
+    Ok(if cfg!(debug_assertions) {
+        std::env::var_os("VNOTE_CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or(state.storage.root.join("codex"))
+    } else {
+        state.storage.root.join("codex")
+    })
+}
+fn parse_models_cache(bytes: Option<&[u8]>) -> Vec<ModelOption> {
+    let Some(bytes) = bytes else { return Vec::new() };
+    let Ok(cache) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
+    cache["models"].as_array().into_iter().flatten().filter_map(|model| {
+        let id = model["slug"].as_str()?;
+        if id.contains("review") { return None; }
+        Some(ModelOption {
+            id: id.to_owned(),
+            label: model["display_name"].as_str().unwrap_or(id).to_owned(),
+        })
+    }).collect()
+}
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption { id: String, label: String }
+#[tauri::command]
+pub fn chat_models(app: AppHandle) -> Vec<ModelOption> {
+    let path = codex_home(&app).map(|home| home.join("models_cache.json"));
+    let bytes = path.ok().and_then(|path| std::fs::read(path).ok());
+    parse_models_cache(bytes.as_deref())
+}
+fn reasoning_effort_arg(effort: &str) -> String {
+    let effort = match effort { "medium" | "high" => effort, _ => "low" };
+    format!("model_reasoning_effort=\"{effort}\"")
 }
 #[tauri::command]
 pub async fn chat_status(app: AppHandle) -> Result<bool, String> {
@@ -135,6 +164,7 @@ pub fn chat_ask(
         .settings
         .chat_model
         .clone();
+    let effort = state.storage.data.lock().map_err(err)?.settings.chat_reasoning_effort.clone();
     let scratch = state.storage.root.join("chat-scratch");
     let mut cmd = command(&app)?;
     cmd.args([
@@ -145,7 +175,7 @@ pub fn chat_ask(
         "--skip-git-repo-check",
         "--ephemeral",
         "-c",
-        "model_reasoning_effort=\"low\"",
+        &reasoning_effort_arg(&effort),
         "-C",
         scratch.to_str().unwrap(),
     ]);
@@ -294,6 +324,24 @@ mod tests {
                 .len(),
             80
         );
+    }
+    #[test]
+    fn models_cache_parsing() {
+        let bytes = br#"{"models":[{"slug":"gpt-one","display_name":"GPT One"},{"slug":"gpt-two"},{"slug":"gpt-review","display_name":"Review"}]}"#;
+        let models = parse_models_cache(Some(bytes));
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gpt-one");
+        assert_eq!(models[0].label, "GPT One");
+        assert_eq!(models[1].label, "gpt-two");
+        assert!(parse_models_cache(None).is_empty());
+        assert!(parse_models_cache(Some(b"not json")).is_empty());
+    }
+    #[test]
+    fn reasoning_effort_argument() {
+        assert_eq!(reasoning_effort_arg("low"), "model_reasoning_effort=\"low\"");
+        assert_eq!(reasoning_effort_arg("medium"), "model_reasoning_effort=\"medium\"");
+        assert_eq!(reasoning_effort_arg("high"), "model_reasoning_effort=\"high\"");
+        assert_eq!(reasoning_effort_arg("invalid"), "model_reasoning_effort=\"low\"");
     }
 }
 
