@@ -11,13 +11,14 @@ from pathlib import Path
 from platformdirs import user_data_dir, user_documents_dir
 
 HERE = Path(__file__).resolve().parent.parent
-VENV = HERE / ".venv"
+DIST_DATA = os.environ.get("VNOTE_DATA_DIR")
+VENV = HERE / (".venv-dist" if DIST_DATA else ".venv")
 FLUID = HERE / "vendor/FluidAudio/.build/release/fluidaudiocli"
 ASR_MODEL = "moona3k/mlx-qwen3-asr-1.7b-8bit"
 LIVE_MODEL = "moona3k/mlx-qwen3-asr-0.6b-4bit"
-PROFILES = Path(user_data_dir("VoiceNote", appauthor=False)) / "profiles.json"
+PROFILES = (Path(DIST_DATA).expanduser() if DIST_DATA else Path(user_data_dir("VoiceNote", appauthor=False))) / "profiles.json"
 CONFIG = PROFILES.with_name("config.json")
-DEFAULT_OUT = Path(user_documents_dir()) / "VoiceNote/transcripts"
+DEFAULT_OUT = Path(DIST_DATA).expanduser() / "transcripts" if DIST_DATA else Path(user_documents_dir()) / "VoiceNote/transcripts"
 PROVENANCE = "provenance: VoiceNote 자동 전사(Qwen3-ASR + FluidAudio 화자 분리). 오인식 교정 없음. 화자N 라벨은 자동 추정."
 MAX_GAP = 2.0      # 같은 화자라도 이만큼(초) 쉬면 줄을 나눈다
 MAX_LEN = 60.0     # 한 줄이 이만큼(초) 넘으면 문장 끝에서 나눈다
@@ -27,6 +28,8 @@ LEAK_MIN = 4       # 힌트 용어가 원래 순서대로 이만큼 연속되면
 def load_config():
     """설정은 읽기만 한다. vault가 없으면 위키를 끈다."""
     cfg = {"vault": "", "semester": ""}
+    if DIST_DATA:
+        return cfg
     if CONFIG.exists():
         try:
             data = json.loads(CONFIG.read_text())
@@ -39,6 +42,8 @@ def load_config():
 
 
 def resolve_wiki_dir(wiki_dir, vault=None):
+    if DIST_DATA:
+        return None
     vault = load_config()["vault"] if vault is None else vault
     if not vault or not wiki_dir:
         return None
@@ -179,7 +184,7 @@ MAX_TERMS = 80
 
 def load_profiles():
     if not PROFILES.exists():
-        return {k: dict(v) for k, v in DEFAULT_PROFILES.items()}
+        return {} if DIST_DATA else {k: dict(v) for k, v in DEFAULT_PROFILES.items()}
     # macOS 경로·인자로 들어온 한글은 NFD(자모 분리)일 수 있어 이름을 NFC로 맞춘다
     return {unicodedata.normalize("NFC", k): v for k, v in json.loads(PROFILES.read_text()).items()}
 
@@ -261,3 +266,14 @@ def write_markdown(src, dur, pname, profile, lines, nspk, out, model):
     dst = unique_path(out_dir / f"{mtime:%Y-%m-%d %H%M} {src.stem}.md")
     dst.write_text("\n".join(head + body))
     return dst
+
+
+def default_asr_model():
+    if DIST_DATA and CONFIG.exists():
+        try:
+            model = json.loads(CONFIG.read_text()).get("asr_model")
+            if isinstance(model, str) and model:
+                return model
+        except (ValueError, AttributeError):
+            pass
+    return ASR_MODEL

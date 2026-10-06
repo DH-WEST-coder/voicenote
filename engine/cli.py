@@ -12,7 +12,7 @@ import unicodedata
 from dataclasses import asdict
 from pathlib import Path
 from engine.core import (ASR_MODEL, LIVE_MODEL, FLUID, VENV, CONFIG, MAX_TERMS,
-                         Reporter, load_config, load_profiles, resolve_wiki_dir,
+                         Reporter, default_asr_model, load_config, load_profiles, resolve_wiki_dir,
                          build_lines, find_leaks, wav_duration, write_markdown,
                          collapse_repeats, _strip_spans)
 
@@ -249,7 +249,7 @@ def main():
     t.add_argument("--terms-file", help="용어 힌트 파일(한 줄에 하나). 프로필 용어에 더한다")
     t.add_argument("--language", help="Korean | English | auto (프로필 언어를 덮어씀)")
     t.add_argument("--course", help="과목 이름(대본 frontmatter의 course). 앱 프로젝트에서 넘긴다")
-    t.add_argument("--asr-model", default=ASR_MODEL)
+    t.add_argument("--asr-model", default=default_asr_model())
     t.add_argument("--diarizer-bin", default=os.environ.get("VNOTE_FLUID_BIN", str(FLUID)))
     lv = sub.add_parser("live", help="실시간 받아쓰기: stdin 16kHz 모노 float32 PCM → JSON 줄")
     lv.add_argument("--model", default=LIVE_MODEL)
@@ -261,7 +261,18 @@ def main():
     lv.add_argument("--realtime", action="store_true", help="--input-file을 실제 시간 속도로 넣는다")
     lv.add_argument("--duration", type=float, help="--input-file의 앞 N초만 쓴다(시험용)")
     sc = sub.add_parser("show-config", help="vault/semester와 프로필별 해석된 wiki_dir 출력")
+    models = sub.add_parser("models", help="배포판 모델 관리")
+    ms = models.add_subparsers(dest="model_action", required=True)
+    status = ms.add_parser("status")
+    status.add_argument("--json", action="store_true")
+    download = ms.add_parser("download")
+    download.add_argument("--set", choices=["full", "lite"], required=True)
+    download.add_argument("--json", action="store_true")
     args = ap.parse_args()
+    if args.cmd == "models":
+        from engine.models import run_models
+        return run_models(args)
+
     if args.cmd == "show-config":
         cfg = load_config()
         print(f"config: {CONFIG}\nvault: {cfg['vault'] or 'vault 없음'}\nsemester: {cfg['semester']}")

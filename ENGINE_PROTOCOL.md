@@ -207,3 +207,22 @@ commit/partial 시간과 통계를 계산한다. MLX 객체는 맥 백엔드 밖
 진행률·통계 시간·출력 폴더는 비교 대상이 아니다. 결과는 `after/regression.diff`, 통과 0/불일치 1.
 병렬 작업의 메시지 교차 순서는 기존부터 비결정적이므로 실제 diff가 있으면 숨기지 않고 보고한다.
 2026-10-06 맥(Metal 사용 가능)에서 실행: 한국어·영어 대본은 date/source 외 동일, 실시간 type 순서와 commit text 동일. 영어 진행 메시지에서 asr progress와 diarize done 순서만 바뀜(병렬 처리로 원래 비결정적).
+
+## 배포판 설정 격리와 models (2단계)
+
+`VNOTE_DATA_DIR`가 있으면 config/profiles는 그 폴더, 기본 출력은 그 아래
+`transcripts/`를 사용한다. 기본 프로필은 `{}`, 위키는 항상 꺼진다.
+개인용(환경 변수 없음) 경로·기본 프로필·JSONL·Markdown 계약은 그대로다.
+배포판 transcribe의 `--asr-model` 생략값은 config.json의 `asr_model`이며,
+설정이 없으면 기존 1.7B 모델이다. 명시한 인자는 항상 우선한다.
+
+- `models status --json`: `{stage:"models",status:"status",models:[{id,downloaded,size_bytes}]}`.
+  ASR 1.7B 8bit, live 0.6B 4bit, Qwen/Qwen3-ForcedAligner-0.6B, FluidAudio를 점검한다.
+- `models download --set full|lite --json`: JSONL
+  `{stage:"models",status:"download",model,progress,downloaded?,total?}`.
+  HF 캐시를 재사용해 이어받는다. full은 1.7B+0.6B+aligner, lite는 0.6B+aligner.
+  FluidAudio는 3초 무음으로 준비한다. 모든 준비가 성공한 뒤 config의 asr_model을 원자 저장한다.
+  완료 `{stage:"models",status:"done",model_set,asr_model}`; 실패
+  `{stage:"models",status:"error",message}`와 종료 코드 1. status 성공은 0.
+- HF 캐시는 `HF_HOME/hub` 또는 `VNOTE_DATA_DIR/models/hub`.
+  모델 관리에 두 환경 변수가 모두 없으면 오류. 모델을 로드하지 않고 캐시만 점검한다.
