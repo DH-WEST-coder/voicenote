@@ -79,7 +79,8 @@ def fluid_complete():
 
 def status():
     _, size = folder_status(fluid_root())
-    return {"stage": "models", "status": "status", "models": [model_status(m) for m in (ASR_MODEL, LIVE_MODEL, ALIGNER)] +
+    precision = "moona3k/mlx-qwen3-asr-1.7b-8bit"
+    return {"stage": "models", "status": "status", "models": [model_status(m) for m in dict.fromkeys((precision, LIVE_MODEL, ALIGNER))] +
             [{"id": "FluidAudio", "downloaded": fluid_complete(), "size_bytes": size}]}
 
 
@@ -87,6 +88,11 @@ def save_model(model):
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
     data["asr_model"] = model
+    save_config(data)
+
+
+def save_config(data):
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=CONFIG.parent, delete=False) as f:
         json.dump(data, f, ensure_ascii=False)
         f.flush()
@@ -246,21 +252,46 @@ def run_models(args):
             def __init__(self, *a, **kw):
                 kw["disable"] = True
                 super().__init__(*a, **kw)
-        chosen = ASR_MODEL if args.set == "full" else LIVE_MODEL
-        models = list(dict.fromkeys([chosen, LIVE_MODEL, ALIGNER]))
-        roots = hf_cache_roots(models)
+        precise = "moona3k/mlx-qwen3-asr-1.7b-8bit"
+        light = "moona3k/mlx-qwen3-asr-0.6b-4bit"
+        allowed = {precise, light}
+        legacy = getattr(args, "set", None)
+        asr_model = getattr(args, "asr_model", None)
+        live_model = getattr(args, "live_model", None)
+        requested = getattr(args, "models", None)
+        downloads = [m.strip() for m in requested.split(",") if m.strip()] if requested else []
+        if legacy:
+            asr_model, live_model = (precise, light) if legacy == "full" else (light, light)
+            downloads.extend([asr_model, live_model])
+        if asr_model:
+            downloads.append(asr_model)
+        if live_model:
+            downloads.append(live_model)
+        downloads = list(dict.fromkeys(downloads))
+        if not downloads:
+            raise ValueError("받을 모델 ID가 없습니다")
+        if any(model not in allowed for model in downloads):
+            raise ValueError("지원하지 않는 ASR 모델입니다")
+        chosen_models = list(dict.fromkeys([*downloads, ALIGNER]))
+        roots = hf_cache_roots(chosen_models)
         initial = tree_bytes(roots)
-        emit("download", status="connecting", model=models[0], downloaded_bytes=initial,
+        emit("download", status="connecting", model=downloads[0], downloaded_bytes=initial,
              total_bytes=0, progress=0, bytes_per_sec=0)
-        sizes = model_sizes(models, HfApi())
+        sizes = model_sizes(chosen_models, HfApi())
         total = sum(sizes.values())
         baseline = initial
-        for model in models:
-            # Include pre-existing files for this repository in the aggregate.
+        for model in chosen_models:
             baseline = download_with_progress(model, total, roots, baseline, emit, snapshot_download, Progress)
         warm_fluid(emit, baseline, total)
-        save_model(chosen)
-        emit("done", model_set=args.set, asr_model=chosen)
+        if asr_model or live_model:
+            data = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+            if asr_model:
+                data["asr_model"] = asr_model
+            if live_model:
+                data["live_model"] = live_model
+            save_config(data)
+        emit("done", model_set=f"{asr_model or ''},{live_model or ''}",
+             models=downloads, asr_model=asr_model, live_model=live_model)
         return 0
     except Exception as e:
         emit("error", message=str(e))

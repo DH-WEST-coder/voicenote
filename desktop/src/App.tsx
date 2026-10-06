@@ -366,7 +366,11 @@ function App() {
         }
     }
     function insert(text: string) { const detail=latest.current.details[selected]||blank; const t=clock(); setText(selected,detail.text+(detail.text&&!detail.text.endsWith('\n')? '\n':'')+(t!==null? `[${time(t)}] `:'')+text.trim()+'\n'); }
-    function download(modelSet: string) { setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet,lastByteAt:Date.now(),status:'connecting',downloadedBytes:0,totalBytes:0,progress:0 }); invoke('download_models',{ modelSet }).catch(e => setModelProgress(old => ({ ...old,busy:false,error:true,text:String(e) }))); }
+    function download(asrModel: string,liveModel: string) {
+        const modelSet=`${asrModel},${liveModel}`;
+        setModelProgress({ busy: true,done: false,text: ko.downloading,modelSet,lastByteAt:Date.now(),status:'connecting',downloadedBytes:0,totalBytes:0,progress:0 });
+        invoke('download_models',{ asrModel,liveModel }).catch(e => setModelProgress(old => ({ ...old,busy:false,error:true,text:String(e) })));
+    }
     const note=data?.notes.find(n => n.id===selected);
     const detail=details[selected]||blank;
     const materials=note?.materials||[];
@@ -571,8 +575,8 @@ function App() {
                 </footer>
             </form>
         </div>}
-        {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} retryDownload={() => download(modelProgress.modelSet)} modelProgress={modelProgress} onError={fail} />}
-        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} retryDownload={() => download(modelProgress.modelSet)} progress={modelProgress} onError={fail} />}
+        {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} modelProgress={modelProgress} onError={fail} />}
+        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} retryDownload={() => download(data.settings.asrModel,data.settings.liveModel)} progress={modelProgress} onError={fail} />}
     </>;
 }
 export default App;

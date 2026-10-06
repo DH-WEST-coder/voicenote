@@ -277,3 +277,14 @@ def default_asr_model():
         except (ValueError, AttributeError):
             pass
     return ASR_MODEL
+
+
+def default_live_model():
+    if DIST_DATA and CONFIG.exists():
+        try:
+            model = json.loads(CONFIG.read_text()).get("live_model")
+            if isinstance(model, str) and model:
+                return model
+        except (ValueError, AttributeError):
+            pass
+    return LIVE_MODEL

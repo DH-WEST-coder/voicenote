@@ -108,9 +108,14 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let mut d = state.storage.data.lock().map_err(err)?;
     let mut settings = settings;
     settings.update_checked = d.settings.update_checked.clone();
-    settings.model_set = d.settings.model_set.clone();
     d.settings = settings;
     state.storage.save(&d)?;
+    let config_path = state.storage.root.join("config.json");
+    let mut config: Value = std::fs::read(&config_path).ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_else(|| json!({}));
+    config["asr_model"] = json!(d.settings.asr_model.clone());
+    config["live_model"] = json!(d.settings.live_model.clone());
+    atomic(&config_path, &serde_json::to_vec_pretty(&config).map_err(err)?)?;
     engine::notify(&app);
     Ok(())
 }
@@ -430,17 +435,21 @@ async fn models_status(app: AppHandle) -> Result<Value, String> {
     .map_err(err)?
 }
 #[tauri::command]
-fn download_models(app: AppHandle, model_set: String) -> Result<(), String> {
-    if !["full", "lite"].contains(&model_set.as_str()) {
-        return Err("잘못된 모델 세트".into());
+fn download_models(app: AppHandle, asr_model: String, live_model: String) -> Result<(), String> {
+    let allowed = ["moona3k/mlx-qwen3-asr-1.7b-8bit", "moona3k/mlx-qwen3-asr-0.6b-4bit"];
+    if !allowed.contains(&asr_model.as_str()) || !allowed.contains(&live_model.as_str()) {
+        return Err("잘못된 받아쓰기 모델".into());
     }
     let state = app.state::<Runtime>();
+    let target_asr = asr_model;
+    let target_live = live_model;
+    let models = [target_asr.as_str(), target_live.as_str()].into_iter().collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(",");
     let mut busy = state.engine.downloads.lock().map_err(err)?;
     if *busy {
         return Err("이미 다운로드 중".into());
     }
     let mut command = engine::command(&app, &state.storage)?;
-    command.args(["models", "download", "--set", &model_set, "--json"]);
+    command.args(["models", "download", "--models", &models, "--asr-model", &target_asr, "--live-model", &target_live, "--json"]);
     let mut child = engine::spawn_with_retry(&app, command)?;
     engine::stderr(app.clone(), child.stderr.take().unwrap());
     let stdout = child.stdout.take().unwrap();
@@ -479,7 +488,8 @@ fn download_models(app: AppHandle, model_set: String) -> Result<(), String> {
         let state = app.state::<Runtime>();
         if completion.is_some() && failure.is_none() && success {
             let mut d = state.storage.data.lock().unwrap();
-            d.settings.model_set = model_set;
+            d.settings.asr_model = target_asr.clone();
+            d.settings.live_model = target_live.clone();
             match state.storage.save(&d) {
                 Ok(()) => {
                     engine::notify(&app);
