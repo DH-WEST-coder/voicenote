@@ -10,3 +10,7 @@ app/.build/
 app/build/
 .DS_Store
 __pycache__/
+
+# 배포판
+.venv-dist/
+dist-build/
