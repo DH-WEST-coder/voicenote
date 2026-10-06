@@ -364,7 +364,9 @@ mod tests {
         assert_eq!(reasoning_effort_arg("low"), "model_reasoning_effort=\"low\"");
         assert_eq!(reasoning_effort_arg("medium"), "model_reasoning_effort=\"medium\"");
         assert_eq!(reasoning_effort_arg("high"), "model_reasoning_effort=\"high\"");
-        assert_eq!(reasoning_effort_arg("invalid"), "model_reasoning_effort=\"low\"");
+        assert_eq!(reasoning_effort_arg("xhigh"), "model_reasoning_effort=\"xhigh\"");
+        assert_eq!(reasoning_effort_arg("low\" -c x"), "model_reasoning_effort=\"low\"");
+        assert_eq!(reasoning_effort_arg(""), "model_reasoning_effort=\"low\"");
     }
 }
 
