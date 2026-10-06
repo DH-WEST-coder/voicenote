@@ -34,7 +34,9 @@ def folder_status(path):
 
 
 def snapshot_complete(snapshot):
-    if not (snapshot / "config.json").is_file() or not (snapshot / "tokenizer.json").is_file():
+    tokenizer = (snapshot / "tokenizer.json").is_file() or all(
+        (snapshot / name).is_file() for name in ("vocab.json", "merges.txt"))
+    if not (snapshot / "config.json").is_file() or not tokenizer:
         return False
     files = list(snapshot.rglob("*"))
     if any(p.is_symlink() and not p.exists() for p in files):
@@ -60,14 +62,17 @@ def model_status(model):
     return {"id": model, "downloaded": complete, "size_bytes": size}
 
 
-def status():
+def fluid_complete():
     root = fluid_root()
-    _, size = folder_status(root)
     required = ("Segmentation.mlmodelc", "Embedding.mlmodelc", "FBank.mlmodelc", "PldaRho.mlmodelc", "plda-parameters.json")
     # ModelHub는 저장소 하위 폴더를 붙일 수 있다. 같은 폴더의 전체 필수 파일을 확인한다.
-    ready = any(all((p.parent / name).exists() for name in required) for p in root.rglob("plda-parameters.json")) if root.exists() else False
+    return any(all((p.parent / name).exists() for name in required) for p in root.rglob("plda-parameters.json")) if root.exists() else False
+
+
+def status():
+    _, size = folder_status(fluid_root())
     return {"stage": "models", "status": "status", "models": [model_status(m) for m in (ASR_MODEL, LIVE_MODEL, ALIGNER)] +
-            [{"id": "FluidAudio", "downloaded": ready, "size_bytes": size}]}
+            [{"id": "FluidAudio", "downloaded": fluid_complete(), "size_bytes": size}]}
 
 
 def save_model(model):
@@ -112,9 +117,11 @@ def warm_fluid(emit):
             f.writeframes(bytes(16000 * 2 * 3))
         emit("download", model="FluidAudio", progress=0)
         result = subprocess.run([str(binary), "process", str(wav), "--mode", "offline", "--output", str(Path(tmp) / "out.json")],
-                                stdout=sys.stderr, stderr=sys.stderr, timeout=900, env=fluid_env())
-        if result.returncode:
-            raise RuntimeError(f"FluidAudio 모델 준비 실패: {result.returncode}")
+                                stdout=sys.stderr, stderr=subprocess.PIPE, text=True, timeout=900, env=fluid_env())
+        if not fluid_complete():
+            lines = (result.stderr or "").strip().splitlines()
+            detail = lines[-1] if lines else "필수 모델 파일 없음"
+            raise RuntimeError(f"FluidAudio 모델 준비 실패: {result.returncode}: {detail}")
         emit("download", model="FluidAudio", progress=1)
 
 

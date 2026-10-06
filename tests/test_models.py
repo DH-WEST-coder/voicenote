@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from engine import models
@@ -100,8 +101,66 @@ def test_warm_fluid_invocation_is_isolated(work_dir, monkeypatch):
             assert (wav.getnchannels(), wav.getframerate(), wav.getnframes()) == (1, 16000, 48000)
         assert kwargs['env']['CFFIXED_USER_HOME'].startswith(str(work_dir))
         assert command[3:5] == ['--mode', 'offline']
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stderr="")
     monkeypatch.setattr(models.subprocess, 'run', run)
+    monkeypatch.setattr(models, "fluid_complete", lambda: True)
     events = []
     models.warm_fluid(lambda kind, **data: events.append(data))
     assert [e['progress'] for e in events] == [0, 1]
+
+
+@pytest.mark.parametrize('model,files', [
+    (models.ASR_MODEL, 'README.md config.json merges.txt quantization_config.json tokenizer_config.json vocab.json weights.safetensors'),
+    (models.LIVE_MODEL, 'README.md config.json merges.txt quantization_config.json tokenizer_config.json vocab.json weights.safetensors'),
+    (models.ALIGNER, 'README.md chat_template.json config.json generation_config.json merges.txt model.safetensors preprocessor_config.json tokenizer_config.json vocab.json'),
+])
+def test_real_snapshot_layout(work_dir, monkeypatch, model, files):
+    monkeypatch.setenv('HF_HOME', str(work_dir))
+    snap = work_dir / 'hub' / ('models--' + model.replace('/', '--')) / 'snapshots/revision'
+    snap.mkdir(parents=True)
+    for name in files.split():
+        (snap / name).write_bytes(b'content')
+    assert models.model_status(model)['downloaded']
+    weight = next(snap.glob('*.safetensors'))
+    weight.write_bytes(b'')
+    assert not models.snapshot_complete(snap)
+    weight.write_bytes(b'weight')
+    (snap / 'merges.txt').unlink()
+    assert not models.snapshot_complete(snap)
+
+
+def fake_fluid(work_dir, monkeypatch, complete, exit_code):
+    monkeypatch.setenv('VNOTE_DATA_DIR', str(work_dir))
+    monkeypatch.setattr(models, 'CONFIG', work_dir / 'config.json')
+    binary = work_dir / 'fluidaudiocli'
+    binary.write_text("#!/bin/sh\n" + (
+        'root="$CFFIXED_USER_HOME/Library/Application Support/FluidAudio/Models/repo"\n'
+        'mkdir -p "$root"\n'
+        'for name in Segmentation Embedding FBank PldaRho; do mkdir -p "$root/$name.mlmodelc"; done\n'
+        'printf "{}" > "$root/plda-parameters.json"\n' if complete else '') +
+        'echo "preparing" >&2\necho "noSpeechDetected" >&2\n' + f'exit {exit_code}\n')
+    binary.chmod(0o755)
+    monkeypatch.setenv('VNOTE_FLUID_BIN', str(binary))
+
+
+@pytest.mark.parametrize('model_set,chosen', [('full', models.ASR_MODEL), ('lite', models.LIVE_MODEL)])
+def test_download_saves_after_no_speech(work_dir, monkeypatch, capfd, model_set, chosen):
+    fake_fluid(work_dir, monkeypatch, True, 1)
+    monkeypatch.setenv('HF_HOME', str(work_dir / 'models'))
+    models.CONFIG.write_text('{"other": 1}')
+    monkeypatch.setattr('huggingface_hub.snapshot_download', lambda *a, **kw: None)
+    assert models.run_models(SimpleNamespace(model_action='download', set=model_set, json=True)) == 0
+    assert json.loads(models.CONFIG.read_text()) == {'other': 1, 'asr_model': chosen}
+    assert json.loads(capfd.readouterr().out.splitlines()[-1])['status'] == 'done'
+
+
+@pytest.mark.parametrize('exit_code', [0, 1])
+def test_missing_fluid_models_fail_with_last_stderr(work_dir, monkeypatch, capfd, exit_code):
+    fake_fluid(work_dir, monkeypatch, False, exit_code)
+    monkeypatch.setenv('HF_HOME', str(work_dir / 'models'))
+    models.CONFIG.write_text('{"asr_model": "old"}')
+    monkeypatch.setattr('huggingface_hub.snapshot_download', lambda *a, **kw: None)
+    assert models.run_models(SimpleNamespace(model_action='download', set='full', json=True)) == 1
+    assert json.loads(models.CONFIG.read_text()) == {'asr_model': 'old'}
+    message = json.loads(capfd.readouterr().out.splitlines()[-1])['message']
+    assert message == f'FluidAudio 모델 준비 실패: {exit_code}: noSpeechDetected'

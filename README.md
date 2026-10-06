@@ -43,6 +43,6 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **NOW**: 배포판 0단계(윈도우 실측) 준비. 계획: [DIST_PLAN.md](DIST_PLAN.md)
-- **NEXT**: 2단계 Tauri 앱. 배포판 기본 프로필에서 개인 과목 용어(`_PE_TERMS`) 빼기
-- **DONE (2026-10-06)**: 배포판 1단계 엔진 분리(공통/맥/윈도우 자리 표시, 개인 경로 제거, 모델·바이너리 인자, ENGINE_PROTOCOL.md). 테스트 27개 통과. 회귀(한국어 3분·영어 2분·실시간 30초)는 맥에서 직접 돌려 기준과 대본이 똑같음을 확인
+- **NOW**: 배포판 3단계 구현·서명된 앱 검증 완료. DMG 전체 빌드·서명·번들 smoke test 완료. Git 커밋은 실행 환경 제한으로 미완료.
+- **NEXT**: 권한 있는 환경에서 A/B 커밋, Opus의 Metal·모델·설치 확인. [검증 보고](DIST_3_REPORT.md)
+- **DONE (2026-10-06)**: Opus 검토 다운로드 버그 수정·회귀 테스트, Rust/TSX 포맷. pytest 42개·Rust 18개·프런트 빌드 통과. 엔진 onedir·FluidAudio/Codex·SwiftPM 리소스 번들, ad-hoc 서명·모델 없는 번들 명령 검증, 배포 문서·라이선스 고지.
