@@ -313,6 +313,10 @@ pub fn stderr(app: AppHandle, reader: impl std::io::Read + Send + 'static) {
     thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else { break };
+            if line.starts_with("[diarize] skipped:") {
+                app.state::<Runtime>().storage.log(&line);
+                continue;
+            }
             // stderr에는 라이브러리가 대본/용어를 출력할 수도 있어 원문은 남기지 않는다.
             // 예외 종류와 알려진 처리 단계만 기록한다.
             app.state::<Runtime>().storage.log(&stderr_category(&line));
@@ -379,10 +383,10 @@ pub fn init(app: AppHandle) -> Engine {
                 let mut d = state.storage.data.lock().unwrap();
                 if let Some(r) = d.recordings.iter_mut().find(|r| r.id == id) {
                     r.status = "failed".into();
-                    r.error = Some(e);
+                    r.error = Some("녹음 처리가 실패했습니다. 로그를 확인한 뒤 다시 처리하세요.".into());
                 }
                 let _ = state.storage.save(&d);
-                state.storage.log("transcribe failed");
+                state.storage.log(&format!("transcribe failed: {e}"));
                 notify(&app);
             }
         }

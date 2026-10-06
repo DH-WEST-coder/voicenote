@@ -43,6 +43,6 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **NOW**: 0.1.1 HF XET 기본 비활성화로 `.incomplete` 바이트 진행률·이어받기 개선. 온보딩 테스트 녹음은 일반 시작/정지 경로 재사용, 실패 오류 표시. pytest 45개·Rust 20개·프런트 빌드 통과; 앱 번들과 DMG 생성·검증 완료(샌드박스에서 attach 실패).
+- **NOW**: diarize `noSpeechDetected`는 빈 화자 구간으로 처리하고, 다른 실패도 화자1 대본 생성을 유지. 빈 ASR 안내문, 짧은 앱 실패 문구·로그 원문·재처리, pytest 52개 통과. Cargo는 `resources/fluid-resources` 누락, Vite 빌드는 공유 `node_modules` 임시 파일 쓰기 `EPERM`으로 검증 보류.
 - **NEXT**: Opus가 설치본에서 실제 네트워크 다운로드와 온보딩 테스트 녹음 GUI 확인.
 - **DONE (2026-10-06)**: 0.1.0 배포 구성·문서·라이선스 및 검증.

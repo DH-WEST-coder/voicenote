@@ -261,6 +261,8 @@ def write_markdown(src, dur, pname, profile, lines, nspk, out, model):
     body = []
     for ln in lines:
         body += [f"[{fmt(ln['t'])}] 화자{ln['spk']}: {ln['body']}", ""]
+    if not body:
+        body = ["본문이 없습니다.", ""]
     out_dir = Path(out).expanduser() if out else DEFAULT_OUT
     out_dir.mkdir(parents=True, exist_ok=True)
     dst = unique_path(out_dir / f"{mtime:%Y-%m-%d %H%M} {src.stem}.md")

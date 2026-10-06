@@ -68,9 +68,14 @@ class MacBackend(Backend):
             with log_path.open("w") as log:
                 from engine.models import fluid_env
                 p = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=fluid_env())
-            if p.returncode != 0 or not out_json.exists():
-                tail = log_path.read_text()[-500:]
+            log = log_path.read_text(errors="replace")
+            if p.returncode != 0:
+                if "noSpeechDetected" in log:
+                    return []
+                tail = log[-500:]
                 raise RuntimeError(f"화자 분리 실패(코드 {p.returncode}): {tail}")
+            if not out_json.exists():
+                raise RuntimeError("화자 분리 결과 파일이 없습니다")
             raw = json.loads(out_json.read_text())
             return [SpeakerSegment(s["speakerId"], s["startTimeSeconds"], s["endTimeSeconds"])
                     for s in raw["segments"]]

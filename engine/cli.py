@@ -81,7 +81,10 @@ def transcribe_file(args, rep):
                 diar["segs"] = [asdict(s) for s in backend.diarize(wav, args.speakers)]
                 rep.emit("diarize", status="done")
             except Exception as e:
-                diar["err"] = e
+                # 화자 분리는 보조 단계다. 실패해도 ASR 대본을 화자1로 만든다.
+                print(f"[diarize] skipped: {e}", file=sys.stderr, flush=True)
+                diar["segs"] = []
+                rep.emit("diarize", status="skipped", reason="화자 분리 실패")
 
         th = threading.Thread(target=diar_job)
         th.start()
@@ -100,9 +103,6 @@ def transcribe_file(args, rep):
             rep.emit("asr", status="done")
         finally:
             th.join()
-        if "err" in diar:
-            raise diar["err"]
-
         rep.emit("merge", status="start")
         leaks = find_leaks(asr["text"], profile.get("terms") or [])
         lines, nspk = build_lines(asr, diar["segs"], leaks)
