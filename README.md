@@ -43,7 +43,7 @@ open app/build/VNote.app
 
 ## Current Work
 
-- **DONE (2026-10-13)**: v0.1.2 릴리스(비공개 저장소 DH-WEST-coder/voicenote, DMG 293MB, 태그 v0.1.2). 저장소는 PRIVATE이라 외부에는 안 보임 — 공개 전환은 사용자 결정.
+- **DONE (2026-10-13)**: v0.1.2 릴리스(비공개 저장소 DH-WEST-coder/voicenote, DMG 293MB, 태그 v0.1.2). 저장소는 2026-10-13 PUBLIC으로 전환(개발 메모·옛 Swift 앱 파일 포함 공개).
 - **NOW**: Claude CLI 연결(0.1.2에 포함), 미설치 PC 버튼 흐름은 실제 확인 전. 설정·첫 실행에서 AI 서비스(ChatGPT/Claude) 선택, 기본 ChatGPT. 사용자 PC의 `claude`를 `-p stream-json`으로 실행(도구·MCP·훅·스킬 끔), 번들 안 함, 로그인·해제는 터미널. Rust 테스트 31개·tsc 통과. 사용자가 dev 앱에서 질문·응답·중지 동작 확인함. 미설치/미로그인 사용자용 자동 연결(설치 스크립트 실행 + Terminal 로그인 창 자동 오픈, SSAM 방식) 추가, Rust 32개·tsc 통과, 아직 실제 클릭 확인 전. 미확인: 미설치 PC에서 버튼 흐름, 빌드된 앱(PATH 빈 환경)에서 `claude` 경로 탐색.  근거: ../DECISIONS.md.
 - **NEXT (Sonnet, 새 세션)**: 위 미확인 두 가지를 앱에서 직접 확인.
 - **이전 NOW**: diarize `noSpeechDetected`는 빈 화자 구간으로 처리하고, 다른 실패도 화자1 대본 생성을 유지. 빈 ASR 안내문, 짧은 앱 실패 문구·로그 원문·재처리, pytest 52개 통과. Cargo는 `resources/fluid-resources` 누락, Vite 빌드는 공유 `node_modules` 임시 파일 쓰기 `EPERM`으로 검증 보류.
