@@ -31,10 +31,10 @@ export function ChatPanel({ messages,busy,connected,ask,stop,login,insert,settin
         </details>
         {!connected&&<>
             <p>
-                {ko.privacy}
+                {settings.chatProvider==='claude'?ko.privacyClaude:ko.privacy}
             </p>
             <button onClick={login}>
-                {ko.login}
+                {settings.chatProvider==='claude'?ko.claudeLogin:ko.login}
             </button>
         </>}
         <div className="quick">

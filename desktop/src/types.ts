@@ -36,6 +36,7 @@ export interface Settings {
     asrModel: string;
     liveModel: string;
     theme: string;
+    chatProvider: 'chatgpt' | 'claude';
     chatModel: string;
     chatReasoningEffort: string;
     updateChecked: string;

@@ -28,6 +28,8 @@ npm run tauri dev -- -- --offline
 
 Codex CLI는 준비된 `src-tauri/binaries/codex-aarch64-apple-darwin`을 사용한다. `CODEX_HOME`은 앱 데이터의 `codex`다. 개발 모드만 `VNOTE_CODEX_HOME`을 지원한다. 개발용 로그인은 `codex login`이며 정식 Sign in with ChatGPT 클라이언트는 이후 교체한다.
 
+Claude Code를 사용하려면 각 사용자 Mac에 Claude Code CLI를 설치하고 터미널에서 `claude`를 실행해 로그인한 다음, VNote 설정 또는 첫 실행의 **AI 서비스**에서 Claude를 선택한다. Claude CLI는 VNote에 번들되지 않는다. Claude 연결 해제도 터미널에서 직접 관리한다.
+
 ## 빌드와 테스트
 
 ```sh

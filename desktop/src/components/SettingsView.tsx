@@ -49,9 +49,10 @@ export function SettingsView({ settings,change,close,connected,login,logout,down
         {models.filter(m => m.id==='Qwen/Qwen3-ForcedAligner-0.6B'||m.id==='FluidAudio').map(m => <p key={m.id}>{m.id}: {m.downloaded?ko.modelReceived:ko.modelMissing} · {m.size_bytes?`${(m.size_bytes/2**30).toFixed(2)} GB`:ko.modelSizePending}</p>)}
         <label><input type="checkbox" checked={settings.liveEnabled} onChange={e => change({...settings,liveEnabled:e.target.checked})}/>{ko.live}</label>
         <label>{ko.theme}<select value={settings.theme} onChange={e => change({...settings,theme:e.target.value})}>{['system','light','dark'].map(t => <option key={t} value={t}>{ko[t as 'system'|'light'|'dark']}</option>)}</select></label>
+        <label>{ko.chatProvider}<select value={settings.chatProvider||'chatgpt'} onChange={e => change({...settings,chatProvider:e.target.value as Settings['chatProvider'],chatModel:''})}><option value="chatgpt">{ko.chatgpt}</option><option value="claude">{ko.claude}</option></select></label>
         <ChatModelSelect settings={settings} change={change} models={chatModels}/>
-        <p>{connected?ko.connected:ko.disconnected}</p><button onClick={connected?logout:login}>{connected?ko.logout:ko.login}</button>
-        <p>{ko.privacy}</p>
+        <p>{connected?ko.connected:ko.disconnected}</p><button onClick={connected?logout:login}>{connected?ko.logout:settings.chatProvider==='claude'?ko.claudeLogin:ko.login}</button>
+        <p>{settings.chatProvider==='claude'?ko.privacyClaude:ko.privacy}</p>
         <div className="toolbar"><button onClick={() => void folder(false)}>{ko.dataFolder}</button><button onClick={() => void folder(true)}>{ko.logsFolder}</button><button onClick={() => setLicenses(!licenses)}>{ko.licenses}</button></div>
         {licenses&&ko.licenseItems.map(([name,license,url]) => <p key={name}><b>{name}</b> · {license}<br/><span className="source">{url}</span></p>)}
         <small>{ko.version} {version}</small>

@@ -62,45 +62,77 @@ fn codex_home(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     })
 }
 fn parse_models(bytes: &[u8]) -> Vec<ModelOption> {
-    let Ok(cache) = serde_json::from_slice::<Value>(bytes) else { return Vec::new() };
-    cache["models"].as_array().into_iter().flatten().filter_map(|model| {
-        let id = model["slug"].as_str()?;
-        if model["visibility"].as_str() != Some("list") { return None; }
-        Some(ModelOption {
-            id: id.to_owned(),
-            label: model["display_name"].as_str().unwrap_or(id).to_owned(),
-            efforts: model["supported_reasoning_levels"].as_array().into_iter().flatten()
-                .filter_map(|level| level["effort"].as_str().map(str::to_owned)).collect(),
+    let Ok(cache) = serde_json::from_slice::<Value>(bytes) else {
+        return Vec::new();
+    };
+    cache["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|model| {
+            let id = model["slug"].as_str()?;
+            if model["visibility"].as_str() != Some("list") {
+                return None;
+            }
+            Some(ModelOption {
+                id: id.to_owned(),
+                label: model["display_name"].as_str().unwrap_or(id).to_owned(),
+                efforts: model["supported_reasoning_levels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|level| level["effort"].as_str().map(str::to_owned))
+                    .collect(),
+            })
         })
-    }).collect()
+        .collect()
 }
 fn parse_models_cache(bytes: Option<&[u8]>) -> Vec<ModelOption> {
-    let Some(bytes) = bytes else { return Vec::new() };
+    let Some(bytes) = bytes else {
+        return Vec::new();
+    };
     parse_models(bytes)
 }
 fn models_from_output(stdout: Option<&[u8]>, cache: Option<&[u8]>) -> Vec<ModelOption> {
-    stdout.map(parse_models).filter(|models| !models.is_empty())
+    stdout
+        .map(parse_models)
+        .filter(|models| !models.is_empty())
         .unwrap_or_else(|| parse_models_cache(cache))
 }
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelOption { id: String, label: String, efforts: Vec<String> }
-#[tauri::command]
-pub async fn chat_models(app: AppHandle) -> Vec<ModelOption> {
+pub struct ModelOption {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) efforts: Vec<String>,
+}
+async fn chatgpt_models(app: AppHandle) -> Vec<ModelOption> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = codex_home(&app).map(|home| home.join("models_cache.json"));
         let cached = path.ok().and_then(|path| std::fs::read(path).ok());
-        let fresh = command(&app).ok().and_then(|mut command| command.args(["debug", "models"]).output().ok())
-            .filter(|output| output.status.success()).map(|output| output.stdout);
+        let fresh = command(&app)
+            .ok()
+            .and_then(|mut command| command.args(["debug", "models"]).output().ok())
+            .filter(|output| output.status.success())
+            .map(|output| output.stdout);
         models_from_output(fresh.as_deref(), cached.as_deref())
-    }).await.unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
 }
 fn reasoning_effort_arg(effort: &str) -> String {
-    let effort = if !effort.is_empty() && effort.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-') { effort } else { "low" };
+    let effort = if !effort.is_empty()
+        && effort
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        effort
+    } else {
+        "low"
+    };
     format!("model_reasoning_effort=\"{effort}\"")
 }
-#[tauri::command]
-pub async fn chat_status(app: AppHandle) -> Result<bool, String> {
+async fn chatgpt_status(app: AppHandle) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let result = command(&app)?
             .args(["login", "status"])
@@ -111,8 +143,7 @@ pub async fn chat_status(app: AppHandle) -> Result<bool, String> {
     .await
     .map_err(err)?
 }
-#[tauri::command]
-pub fn chat_login(app: AppHandle) -> Result<(), String> {
+fn chatgpt_login(app: AppHandle) -> Result<(), String> {
     let state = app.state::<Runtime>();
     let mut login = state.chat.login.lock().map_err(err)?;
     if let Some(c) = login.as_mut() {
@@ -127,10 +158,9 @@ pub fn chat_login(app: AppHandle) -> Result<(), String> {
     *login = Some(c);
     Ok(())
 }
-#[tauri::command]
-pub async fn chat_logout(app: AppHandle) -> Result<(), String> {
+async fn chatgpt_logout(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        chat_stop(app.clone())?;
+        stop(app.clone())?;
         let state = app.state::<Runtime>();
         if let Some(mut c) = state.chat.login.lock().map_err(err)?.take() {
             engine::kill_child(&mut c);
@@ -146,8 +176,7 @@ pub async fn chat_logout(app: AppHandle) -> Result<(), String> {
     .await
     .map_err(err)?
 }
-#[tauri::command]
-pub fn chat_stop(app: AppHandle) -> Result<(), String> {
+fn stop(app: AppHandle) -> Result<(), String> {
     let state = app.state::<Runtime>();
     state.chat.stopped.store(true, Ordering::SeqCst);
     if let Some(c) = state.chat.child.lock().map_err(err)?.as_mut() {
@@ -155,8 +184,7 @@ pub fn chat_stop(app: AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
-#[tauri::command]
-pub fn chat_ask(
+fn chatgpt_ask(
     app: AppHandle,
     note_id: String,
     prompt: String,
@@ -177,7 +205,14 @@ pub fn chat_ask(
         .settings
         .chat_model
         .clone();
-    let effort = state.storage.data.lock().map_err(err)?.settings.chat_reasoning_effort.clone();
+    let effort = state
+        .storage
+        .data
+        .lock()
+        .map_err(err)?
+        .settings
+        .chat_reasoning_effort
+        .clone();
     let scratch = state.storage.root.join("chat-scratch");
     let mut cmd = command(&app)?;
     cmd.args([
@@ -276,6 +311,113 @@ pub fn chat_ask(
     Ok(())
 }
 #[tauri::command]
+pub fn chat_stop(app: AppHandle) -> Result<(), String> {
+    stop(app)
+}
+
+#[tauri::command]
+pub async fn chat_status(app: AppHandle) -> Result<bool, String> {
+    if app
+        .state::<Runtime>()
+        .storage
+        .data
+        .lock()
+        .map_err(err)?
+        .settings
+        .chat_provider
+        == "claude"
+    {
+        crate::claude::chat_status(app).await
+    } else {
+        chatgpt_status(app).await
+    }
+}
+
+#[tauri::command]
+pub async fn chat_models(app: AppHandle) -> Vec<ModelOption> {
+    if app
+        .state::<Runtime>()
+        .storage
+        .data
+        .lock()
+        .map(|d| d.settings.chat_provider == "claude")
+        .unwrap_or(false)
+    {
+        crate::claude::chat_models()
+            .await
+            .into_iter()
+            .map(|m| ModelOption {
+                id: m.id,
+                label: m.label,
+                efforts: m.efforts,
+            })
+            .collect()
+    } else {
+        chatgpt_models(app).await
+    }
+}
+
+#[tauri::command]
+pub fn chat_login(app: AppHandle) -> Result<(), String> {
+    if app
+        .state::<Runtime>()
+        .storage
+        .data
+        .lock()
+        .map_err(err)?
+        .settings
+        .chat_provider
+        == "claude"
+    {
+        crate::claude::chat_login(app)
+    } else {
+        chatgpt_login(app)
+    }
+}
+
+#[tauri::command]
+pub async fn chat_logout(app: AppHandle) -> Result<(), String> {
+    if app
+        .state::<Runtime>()
+        .storage
+        .data
+        .lock()
+        .map_err(err)?
+        .settings
+        .chat_provider
+        == "claude"
+    {
+        crate::claude::chat_logout()
+    } else {
+        chatgpt_logout(app).await
+    }
+}
+
+#[tauri::command]
+pub fn chat_ask(
+    app: AppHandle,
+    note_id: String,
+    prompt: String,
+    request_id: String,
+    terms: bool,
+) -> Result<(), String> {
+    if app
+        .state::<Runtime>()
+        .storage
+        .data
+        .lock()
+        .map_err(err)?
+        .settings
+        .chat_provider
+        == "claude"
+    {
+        crate::claude::chat_ask(app, note_id, prompt, request_id, terms)
+    } else {
+        chatgpt_ask(app, note_id, prompt, request_id, terms)
+    }
+}
+
+#[tauri::command]
 pub fn save_chat(app: AppHandle, note_id: String, messages: Value) -> Result<(), String> {
     id(&note_id)?;
     atomic(
@@ -361,11 +503,26 @@ mod tests {
     }
     #[test]
     fn reasoning_effort_argument() {
-        assert_eq!(reasoning_effort_arg("low"), "model_reasoning_effort=\"low\"");
-        assert_eq!(reasoning_effort_arg("medium"), "model_reasoning_effort=\"medium\"");
-        assert_eq!(reasoning_effort_arg("high"), "model_reasoning_effort=\"high\"");
-        assert_eq!(reasoning_effort_arg("xhigh"), "model_reasoning_effort=\"xhigh\"");
-        assert_eq!(reasoning_effort_arg("low\" -c x"), "model_reasoning_effort=\"low\"");
+        assert_eq!(
+            reasoning_effort_arg("low"),
+            "model_reasoning_effort=\"low\""
+        );
+        assert_eq!(
+            reasoning_effort_arg("medium"),
+            "model_reasoning_effort=\"medium\""
+        );
+        assert_eq!(
+            reasoning_effort_arg("high"),
+            "model_reasoning_effort=\"high\""
+        );
+        assert_eq!(
+            reasoning_effort_arg("xhigh"),
+            "model_reasoning_effort=\"xhigh\""
+        );
+        assert_eq!(
+            reasoning_effort_arg("low\" -c x"),
+            "model_reasoning_effort=\"low\""
+        );
         assert_eq!(reasoning_effort_arg(""), "model_reasoning_effort=\"low\"");
     }
 }

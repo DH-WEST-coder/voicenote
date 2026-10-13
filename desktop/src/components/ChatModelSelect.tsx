@@ -16,13 +16,13 @@ export function ChatModelSelect({ settings,change,models }: {
     },[selectedEfforts,efforts,settings,change]);
     return <>
         <label>
-            {ko.model}
+            {settings.chatProvider==='claude'?ko.claudeModel:ko.chatgptModel}
             <select value={settings.chatModel} onChange={e => {
                 const model=models.find(m => m.id===e.target.value);
                 const supported=model?.efforts.length?model.efforts:['low','medium','high'];
                 change({ ...settings,chatModel:e.target.value,...(supported.includes(settings.chatReasoningEffort)?{}:{chatReasoningEffort:'low'}) });
             }}>
-                <option value="">{ko.defaultModel}</option>
+                <option value="">{settings.chatProvider==='claude'?'Claude Code 기본 모델':ko.defaultModel}</option>
                 {!cached&&settings.chatModel&&<option value={settings.chatModel}>{ko.unknownModel}: {settings.chatModel}</option>}
                 {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>

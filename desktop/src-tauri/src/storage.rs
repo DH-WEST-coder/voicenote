@@ -55,6 +55,7 @@ pub struct Settings {
     pub asr_model: String,
     pub live_model: String,
     pub theme: String,
+    pub chat_provider: String,
     pub chat_model: String,
     pub chat_reasoning_effort: String,
     pub update_checked: String,
@@ -67,6 +68,7 @@ impl Default for Settings {
             asr_model: "moona3k/mlx-qwen3-asr-1.7b-8bit".into(),
             live_model: "moona3k/mlx-qwen3-asr-0.6b-4bit".into(),
             theme: "system".into(),
+            chat_provider: "chatgpt".into(),
             chat_model: String::new(),
             chat_reasoning_effort: "low".into(),
             update_checked: String::new(),
@@ -321,6 +323,15 @@ mod boundary_tests {
             .owned(s.root.join("audio/link.wav").to_str().unwrap())
             .is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settings_without_chat_provider_default_to_chatgpt() {
+        let legacy = br#"{"onboardingDone":true,"liveEnabled":false,"asrModel":"a","liveModel":"b","theme":"dark","chatModel":"opus","chatReasoningEffort":"high","updateChecked":""}"#;
+        let settings: Settings = serde_json::from_slice(legacy).unwrap();
+        assert_eq!(settings.chat_provider, "chatgpt");
+        let serialized = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(serialized["chatProvider"], "chatgpt");
     }
 
     #[test]

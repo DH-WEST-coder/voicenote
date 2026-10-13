@@ -18,6 +18,7 @@ function App() {
     const [selected,setSelected]=useState('');
     const [details,setDetails]=useState<Record<string,Detail>>({});
     const [error,setError]=useState('');
+    const [notice,setNotice]=useState('');
     const [settingsOpen,setSettingsOpen]=useState(false);
     const [chatVisible,setChatVisible]=useState(true);
     const [tab,setTab]=useState('transcript');
@@ -105,12 +106,15 @@ function App() {
             html_url: string;
             tag_name: string;
         }|null>('check_update').then(setUpdate).catch(() => { });
-        const timer=setInterval(() => { invoke<boolean>('chat_status').then(setConnected).catch(() => { }); },4000);
+        const timer=setInterval(() => { invoke<boolean>('chat_status').then(c => { setConnected(c); if(c) setNotice(''); }).catch(() => { }); },4000);
         return () => { clearInterval(timer); if(testTimer.current) clearTimeout(testTimer.current); };
     },[refresh]);
     useEffect(() => {
-        if(connected) invoke<ChatModel[]>('chat_models').then(setChatModels).catch(fail);
-    },[connected,fail]);
+        if(data?.settings.chatProvider) {
+            invoke<boolean>('chat_status').then(setConnected).catch(() => setConnected(false));
+            invoke<ChatModel[]>('chat_models').then(setChatModels).catch(fail);
+        }
+    },[data?.settings.chatProvider,fail]);
     useEffect(() => {
         if(selected&&!details[selected])
             loadDetail(selected).then(detail => setDetails(old => ({ ...old,[selected]: old[selected]||detail }))).catch(fail);
@@ -132,6 +136,10 @@ function App() {
                 unlisten.push(off);
         };
         void register(listen('data-changed',() => void refresh()));
+        void register(listen<{ step: string; message: string }>('claude-setup',e => {
+            if(e.payload.step==='error') { setNotice(''); setError(e.payload.message); }
+            else setNotice(e.payload.message);
+        }));
         void register(listen<{
             id: string;
             message: {
@@ -233,7 +241,7 @@ function App() {
                     else if(latest.current.connected)
                         importedPdf=true;
                     else
-                        fail(ko.extractLogin);
+                        fail(latest.current.data?.settings.chatProvider==='claude'?ko.extractLoginClaude:ko.extractLogin);
                     setTab('materials');
                     setMaterialId(materialId);
                 }
@@ -401,6 +409,12 @@ function App() {
                 </button>
             </div>}
         </header>
+        {notice&&!error&&<div className="error-banner notice-banner" role="status">
+            {notice}
+            <button onClick={() => setNotice('')}>
+                {ko.close}
+            </button>
+        </div>}
         {error&&<div className="error-banner" role="alert">
             {error}
             {error.includes(ko.microphoneKeyword)&&<button onClick={() => openUrl(ko.microphoneUrl).catch(fail)}>
@@ -582,7 +596,7 @@ function App() {
             </form>
         </div>}
         {data&&!data.settings.onboardingDone&&<Setup settings={data.settings} onSettings={changeSettings} testRecording={() => void testRecording()} connected={connected} login={() => void run('chat_login')} download={download} modelProgress={modelProgress} onError={fail} />}
-        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login')} logout={() => void run('chat_logout').then(() => setConnected(false))} download={download} retryDownload={() => download(data.settings.asrModel,data.settings.liveModel)} progress={modelProgress} onError={fail} onModels={setChatModels} />}
+        {data&&settingsOpen&&<SettingsView settings={data.settings} change={changeSettings} close={() => setSettingsOpen(false)} connected={connected} login={() => void run('chat_login').then(() => { if(data.settings.chatProvider==='claude') invoke<boolean>('chat_status').then(setConnected).catch(fail); })} logout={() => void run('chat_logout').then(() => { if(data.settings.chatProvider==='claude') invoke<boolean>('chat_status').then(setConnected).catch(fail); else setConnected(false); })} download={download} retryDownload={() => download(data.settings.asrModel,data.settings.liveModel)} progress={modelProgress} onError={fail} onModels={setChatModels} />}
     </>;
 }
 export default App;
